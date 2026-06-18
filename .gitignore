@@ -1,0 +1,16 @@
+# Model checkpoints (too large for GitHub)
+**/checkpoints*/
+**/checkpoints_v*/
+
+# Training data (too large)
+**/training_data*/
+**/training_data_v*/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Misc
+.DS_Store
+*.log
