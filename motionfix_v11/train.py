@@ -19,7 +19,7 @@ from dataset import MotionFixDataset
 BATCH_SIZE = 32
 NUM_EPOCHS = 50
 LEARNING_RATE = 0.0001
-DATA_DIR = "../motionfix_v10/training_data_v10"
+DATA_DIR = "../training_data_v2"         # V2: all-joint distortions, larger magnitudes
 SAVE_DIR = "checkpoints_v11"
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 

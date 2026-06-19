@@ -1,10 +1,9 @@
 """
-MotionFix V10 - Dataset
+MotionFix V11 - Dataset
 
-返回三元组: (distorted, target, contact)
-  distorted: (max_len, 66)  仅下半身有瑕疵的关节位置
-  target:    (max_len, 66)  干净关节位置
-  contact:   (max_len, 2)   左右脚着地标签
+支持两种数据格式:
+  1. 新格式 (V10): distorted_*.npy + target_*.npy + contact_*.npy → 三元组
+  2. 旧格式 (V2):  distorted_*.npy + target_*.npy → 二元组 (contact=None)
 """
 
 import torch
@@ -22,8 +21,13 @@ class MotionFixDataset(Dataset):
         self.distorted_files = sorted(
             glob.glob(f"{data_dir}/distorted_*.npy")
         )
+
+        # 检测是否有 contact 文件
+        first_contact = self.distorted_files[0].replace('distorted_', 'contact_') if self.distorted_files else ''
+        self.has_contact = os.path.exists(first_contact)
+
         print(f"Dataset: {len(self.distorted_files)} pairs from {data_dir}")
-        print(f"  max_len={max_len}, with contact labels")
+        print(f"  max_len={max_len}, contact_labels={'YES' if self.has_contact else 'NO'}")
 
     def __len__(self):
         return len(self.distorted_files)
@@ -35,24 +39,30 @@ class MotionFixDataset(Dataset):
 
         distorted = np.load(distorted_path)    # (T, 22, 3)
         target = np.load(target_path)          # (T, 22, 3)
-        contact = np.load(contact_path)        # (T, 2)
 
-        # 展平: (T, 22, 3) -> (T, 66)
+        # 展平
         T = distorted.shape[0]
         distorted = distorted.reshape(T, -1).astype(np.float32)
         target = target.reshape(T, -1).astype(np.float32)
-        contact = contact.astype(np.float32)
 
-        # 统一长度到 max_len
+        # 统一长度
         if T > self.max_len:
             distorted = distorted[:self.max_len]
             target = target[:self.max_len]
-            contact = contact[:self.max_len]
         elif T < self.max_len:
             pad_len = self.max_len - T
             distorted = np.pad(distorted, ((0, pad_len), (0, 0)), mode='constant')
             target = np.pad(target, ((0, pad_len), (0, 0)), mode='constant')
-            contact = np.pad(contact, ((0, pad_len), (0, 0)), mode='constant')
+
+        # Contact (可选)
+        if self.has_contact:
+            contact = np.load(contact_path).astype(np.float32)  # (T, 2)
+            if T > self.max_len:
+                contact = contact[:self.max_len]
+            elif T < self.max_len:
+                contact = np.pad(contact, ((0, self.max_len - T), (0, 0)), mode='constant')
+        else:
+            contact = np.zeros((self.max_len, 2), dtype=np.float32)
 
         return (
             torch.FloatTensor(distorted),
@@ -62,13 +72,14 @@ class MotionFixDataset(Dataset):
 
 
 if __name__ == "__main__":
-    dataset = MotionFixDataset("training_data_v10")
+    # 测试 V2 格式
+    dataset = MotionFixDataset("../training_data_v2")
     loader = DataLoader(dataset, batch_size=32, shuffle=True, num_workers=4)
 
     for distorted, target, contact in loader:
         print(f"Batch distorted: {distorted.shape}")
         print(f"Batch target:    {target.shape}")
-        print(f"Batch contact:   {contact.shape}")
+        print(f"Batch contact:   {contact.shape} (all zeros)")
         break
 
     print("Dataset test passed.")
