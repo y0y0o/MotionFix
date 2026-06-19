@@ -46,15 +46,8 @@ def train():
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # ---- 损失 & 优化器 ----
-    # 修正力: λ_foot=2.0, λ_foot_vel=1.0 (直接脚部监督)
-    # 保守力: λ_vel=0.3 (温和速度匹配), λ_foot_ct=0.5 (接触门控辅助)
-    criterion = MotionFixLoss(
-        lambda_foot=2.0,
-        lambda_foot_vel=1.0,
-        lambda_vel=0.3,
-        lambda_foot_ct=0.5,
-        lambda_vel_cons=0.2,
-    )
+    # V8 验证过的损失: λ_vel=0.5, λ_foot=2.0
+    criterion = MotionFixLoss(lambda_vel=0.5, lambda_foot=2.0)
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.5)
 
@@ -75,7 +68,7 @@ def train():
         model.train()
         t0 = time.time()
 
-        total_loss = total_recon = total_foot = total_foot_ct = total_vel_cons = 0.0
+        total_loss = total_l1 = total_foot = total_foot_vel = 0.0
 
         for distorted, target, contact in loader:
             distorted = distorted.to(DEVICE)
@@ -85,10 +78,8 @@ def train():
             # 训练模式: 全量重建 (foot_only=False)
             pred = model(distorted, foot_only=False)
 
-            # 混合损失: V8 直接监督 + FRDM 接触门控辅助
-            loss, l_recon, l_foot, l_foot_ct, l_vel_cons = criterion(
-                pred, target, contact
-            )
+            # V8 损失
+            loss, l1, foot, foot_vel = criterion(pred, target, contact)
 
             optimizer.zero_grad()
             loss.backward()
@@ -96,10 +87,9 @@ def train():
             optimizer.step()
 
             total_loss += loss.item()
-            total_recon += l_recon.item()
-            total_foot += l_foot.item()
-            total_foot_ct += l_foot_ct.item()
-            total_vel_cons += l_vel_cons.item()
+            total_l1 += l1.item()
+            total_foot += foot.item()
+            total_foot_vel += foot_vel.item()
 
         scheduler.step()
         n = len(loader)
@@ -110,10 +100,9 @@ def train():
         print(
             f"Epoch {epoch+1:3d}/{NUM_EPOCHS} | "
             f"Loss: {total_loss/n:.4f} = "
-            f"R:{total_recon/n:.4f} + "
+            f"L1:{total_l1/n:.4f} + "
             f"Foot:{total_foot/n:.4f} + "
-            f"Ct:{total_foot_ct/n:.4f} + "
-            f"Vc:{total_vel_cons/n:.4f} | "
+            f"FVel:{total_foot_vel/n:.4f} | "
             f"LR: {lr:.6f} | {elapsed:.1f}s"
         )
 

@@ -166,130 +166,54 @@ class MotionFixNetwork(nn.Module):
 
 
 # ================================================================
-#  V11 混合损失: V8 直接监督 + FRDM 接触门控辅助
+#  V11 损失 — 使用 V8 的验证过的损失函数
 # ================================================================
 class MotionFixLoss(nn.Module):
     """
-    损失设计原则: 修正力 >> 保守力
-
-      L_recon      基础 L1 重建（全关节）
-      L_foot       直接脚部位置 L1（V8 风格，所有帧）
-      L_foot_vel   脚部速度 L1（所有帧）
-      L_vel        全局速度匹配（温和，保持整体动力学）
-      L_foot_ct    接触门控足部约束（FRDM 风格，辅助信号）
-      L_vel_cons   速度-位置一致性（FRDM 风格自洽）
+    与 V8 完全一致的损失:
+      L_recon    全关节 L1 重建
+      L_vel      全关节速度 L1
+      L_foot     脚部位置 L1 (直接监督, 所有帧)
+      L_foot_vel 脚部速度 L1 (直接监督, 所有帧)
     """
-
-    def __init__(
-        self,
-        lambda_foot=2.0,              # 直接脚部监督（最强）
-        lambda_foot_vel=1.0,          # 脚部速度监督
-        lambda_vel=0.3,               # 全局速度匹配（温和）
-        lambda_foot_ct=0.5,           # 接触门控辅助（弱）
-        lambda_vel_cons=0.2,          # 速度-位置自洽
-        foot_joints=(7, 8, 10, 11),
-    ):
+    def __init__(self, lambda_vel=0.5, lambda_foot=2.0):
         super().__init__()
-        self.lambda_foot = lambda_foot
-        self.lambda_foot_vel = lambda_foot_vel
         self.lambda_vel = lambda_vel
-        self.lambda_foot_ct = lambda_foot_ct
-        self.lambda_vel_cons = lambda_vel_cons
-        self.l1 = nn.L1Loss()
+        self.lambda_foot = lambda_foot
+        self.l1_loss = nn.L1Loss()
 
-        # 脚部关节维度
-        self.foot_joints = foot_joints
+        self.foot_joints = [7, 8, 10, 11]
         self.foot_dims = []
-        for j in foot_joints:
+        for j in self.foot_joints:
             self.foot_dims.extend([j * 3, j * 3 + 1, j * 3 + 2])
 
-    # ----------------------------------------------------------
-    #  直接脚部 L1（V8 风格）
-    # ----------------------------------------------------------
-    def _foot_l1_loss(self, pred, target):
-        """所有帧的脚部位置 + 速度直接监督"""
-        pred_foot = pred[:, :, self.foot_dims]
-        target_foot = target[:, :, self.foot_dims]
-        loss_pos = self.l1(pred_foot, target_foot)
-
-        pred_foot_vel = pred_foot[:, 1:, :] - pred_foot[:, :-1, :]
-        target_foot_vel = target_foot[:, 1:, :] - target_foot[:, :-1, :]
-        loss_vel = self.l1(pred_foot_vel, target_foot_vel)
-
-        return loss_pos, loss_vel
-
-    # ----------------------------------------------------------
-    #  接触门控足部约束（FRDM 风格）
-    # ----------------------------------------------------------
-    def _foot_contact_loss(self, pred, contact):
-        """
-        当脚着地 (b=1) 时，约束相邻帧脚位置变化 → 0
-        """
-        B, T, _ = pred.shape
-
-        # 取脚踝位置: (B, T, 4, 3) → 只取左右脚踝 (0,1)
-        foot_pos = pred[:, :, self.foot_dims].reshape(B, T, len(self.foot_joints), 3)
-        foot_pos = foot_pos[:, :, :2, :]              # (B, T, 2, 3)
-
-        # 相邻帧位移
-        foot_vel = foot_pos[:, 1:, :, :] - foot_pos[:, :-1, :, :]  # (B, T-1, 2, 3)
-
-        # 接触掩码
-        mask = contact[:, :-1, :].unsqueeze(-1)       # (B, T-1, 2, 1)
-
-        loss = ((foot_vel * mask) ** 2).sum(dim=-1).mean()
-        return loss
-
-    # ----------------------------------------------------------
-    #  速度-位置一致性（FRDM 风格）
-    # ----------------------------------------------------------
-    def _velocity_consistency_loss(self, pred):
-        """cumsum(vel) 应与直接输出的位置一致"""
-        pred_vel = pred[:, 1:, :] - pred[:, :-1, :]
-        pred_pos_from_vel = torch.cumsum(pred_vel, dim=1)
-        pred_pos_direct = pred[:, 1:, :]
-        return self.l1(pred_pos_from_vel, pred_pos_direct)
-
-    # ----------------------------------------------------------
-    #  总损失
-    # ----------------------------------------------------------
     def forward(self, pred, target, contact=None):
-        """
-        pred:    (B, T, 66)
-        target:  (B, T, 66)
-        contact: (B, T, 2)  可选，用于接触门控损失
-        """
-        # 1. 全关节重建
-        loss_recon = self.l1(pred, target)
+        # contact is ignored — kept for API compatibility with V11 dataset
 
-        # 2. 直接脚部监督（V8 核心，最强权重）
-        loss_foot_pos, loss_foot_vel = self._foot_l1_loss(pred, target)
-        loss_foot = loss_foot_pos + loss_foot_vel
+        # 1. Full body L1
+        loss_l1 = self.l1_loss(pred, target)
 
-        # 3. 全局速度匹配（温和）
+        # 2. Full body velocity (温和)
         pred_vel = pred[:, 1:, :] - pred[:, :-1, :]
         target_vel = target[:, 1:, :] - target[:, :-1, :]
-        loss_vel = self.l1(pred_vel, target_vel)
+        loss_vel = self.l1_loss(pred_vel, target_vel)
 
-        # 4. 接触门控辅助（FRDM 风格，弱权重）
-        loss_foot_ct = torch.tensor(0.0, device=pred.device)
-        if contact is not None:
-            loss_foot_ct = self._foot_contact_loss(pred, contact)
+        # 3. Foot position L1 (直接监督)
+        pred_foot = pred[:, :, self.foot_dims]
+        target_foot = target[:, :, self.foot_dims]
+        loss_foot = self.l1_loss(pred_foot, target_foot)
 
-        # 5. 速度-位置自洽（FRDM 风格）
-        loss_vel_cons = self._velocity_consistency_loss(pred)
+        # 4. Foot velocity L1 (直接监督)
+        pred_foot_vel = pred_foot[:, 1:, :] - pred_foot[:, :-1, :]
+        target_foot_vel = target_foot[:, 1:, :] - target_foot[:, :-1, :]
+        loss_foot_vel = self.l1_loss(pred_foot_vel, target_foot_vel)
 
-        # 加权求和
-        loss_total = (
-            loss_recon
-            + self.lambda_foot * loss_foot
-            + self.lambda_foot_vel * loss_foot_vel
+        total = (
+            loss_l1
             + self.lambda_vel * loss_vel
-            + self.lambda_foot_ct * loss_foot_ct
-            + self.lambda_vel_cons * loss_vel_cons
+            + self.lambda_foot * (loss_foot + loss_foot_vel)
         )
-
-        return loss_total, loss_recon, loss_foot, loss_foot_ct, loss_vel_cons
+        return total, loss_l1, loss_foot, loss_foot_vel
 
 
 # ================================================================
@@ -320,13 +244,12 @@ if __name__ == "__main__":
     # 损失测试
     criterion = MotionFixLoss()
     target = x.clone()
-    total, l_recon, l_foot, l_foot_ct, l_vel_cons = criterion(y_train, target, contact)
+    total, l1, l_foot, l_foot_vel = criterion(y_train, target, contact)
 
     print(f"\nLoss breakdown:")
-    print(f"  L_recon:     {l_recon.item():.6f}")
+    print(f"  L_recon:     {l1.item():.6f}")
     print(f"  L_foot:      {l_foot.item():.6f}")
-    print(f"  L_foot_ct:   {l_foot_ct.item():.6f}")
-    print(f"  L_vel_cons:  {l_vel_cons.item():.6f}")
+    print(f"  L_foot_vel:  {l_foot_vel.item():.6f}")
     print(f"  Total:       {total.item():.6f}")
 
     # 参数量
