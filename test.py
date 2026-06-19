@@ -50,7 +50,7 @@ def main():
     momask_dir = "./momask_50_results/no_ik"
     momask_files = sorted(glob.glob(f"{momask_dir}/*.npy"))
 
-    output_dir = "fixed_outputs"
+    output_dir = "fixed_outputs_v8"
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"\nFound {len(momask_files)} MoMask files")
