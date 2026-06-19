@@ -21,30 +21,63 @@ IGNORE_PATTERNS = [
     "*.pyo",
     ".DS_Store",
     "autosync.py",    # don't trigger on changes to this script itself
+    "sync.sh",        # don't trigger on the launcher
     "*.swp",
     "*.swo",
     "*~",
     ".gitignore.swp",
+    # Large data / output directories — skip to keep scans fast
+    "training_data/*",
+    "training_data_v2/*",
+    "checkpoints/*",
+    "checkpoints_v*/*",
+    "fixed_outputs/*",
+    "fixed_outputs_*/*",
+    "fixed_outputs_v*/*",
+    "mdm_raw_joints/*",
+    "t2mgpt_raw_joints/*",
+    "momask_results/*",
+    "momask_50_results/*",
+    "visualizations/*",
+    "*.npy",          # binary output files
+    "autosync.log",   # don't watch our own log
+    "*.log",          # log files in general
 ]
 # ===============================
 
 
+# Directory prefixes to skip — any dir whose name starts with one of these is
+# pruned in-place so os.walk never descends into it.
+IGNORE_DIR_PREFIXES = (
+    ".git",
+    "__pycache__",
+    "checkpoints",
+    "fixed_outputs",
+    "training_data",
+    "mdm_raw_joints",
+    "t2mgpt_raw_joints",
+    "momask_results",
+    "momask_50_results",
+    "visualizations",
+)
+
+
+def _is_ignored_dir(dirname):
+    """Check whether a directory should be skipped entirely."""
+    return dirname.startswith(IGNORE_DIR_PREFIXES)
+
+
 def get_all_files():
-    """Return set of all tracked + untracked (non-ignored) files with their mtimes."""
+    """Return dict of {relpath: mtime} for non-ignored files."""
     files = {}
     for root, dirs, filenames in os.walk(WATCH_DIR):
-        # Skip .git directory
-        if ".git" in root.split(os.sep):
-            continue
-        # Skip __pycache__
-        if "__pycache__" in root.split(os.sep):
-            continue
+        # Prune ignored directories in-place so os.walk never descends into them
+        dirs[:] = [d for d in dirs if not _is_ignored_dir(d)]
 
         for fname in filenames:
-            fullpath = os.path.join(root, fname)
-            relpath = os.path.relpath(fullpath, WATCH_DIR)
+            relpath = os.path.relpath(os.path.join(root, fname), WATCH_DIR)
 
-            # Apply ignore patterns
+            # Apply ignore patterns (only to files, dirs handled above)
             ignored = False
             for pat in IGNORE_PATTERNS:
                 if fnmatch.fnmatch(relpath, pat) or fnmatch.fnmatch(fname, pat):
@@ -54,7 +87,7 @@ def get_all_files():
                 continue
 
             try:
-                mtime = os.path.getmtime(fullpath)
+                mtime = os.path.getmtime(os.path.join(root, fname))
                 files[relpath] = mtime
             except OSError:
                 continue

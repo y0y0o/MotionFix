@@ -11,7 +11,9 @@
 ## Overview
 
 VQ-VAE-based motion generation models (MoMask, T2M-GPT) offer **15–20× faster inference** than diffusion-based approaches, making them ideal for real-time applications. However, they suffer from **foot skating** — feet slide along the ground when they should stay planted during contact phases. MotionFix addresses this with a Transformer-based correction network.
-
+---
+### Project Processing -- Update everyday(maybe)
+---
 ### Key Features
 
 - **🔥 Selective Correction** — Only modifies foot joints on skating frames; leaves other body parts untouched
@@ -203,7 +205,9 @@ This project is part of ongoing research at Durham University. If you use Motion
 # MotionFix: 基于 VQ 的动作生成脚步滑动修正
 
 **MotionFix** 是一个轻量级后处理神经网络，用于修正基于 VQ 的文本到动作生成模型（MoMask、T2M-GPT）中的**脚步滑动伪影**。它作为即插即用模块工作——无需重新训练底层的生成模型。
-
+---
+### 项目仍在进行中 - 每日更新（大概）
+---
 ## 概述
 
 基于 VQ-VAE 的动作生成模型推理速度比扩散模型快 **15–20 倍**，但在脚部接触地面时会出现滑动现象。MotionFix 通过一个 Transformer 修正网络来解决这个问题。
