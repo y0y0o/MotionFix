@@ -126,8 +126,7 @@ class MotionFixNetwork(nn.Module):
 
     def _selective_replace(self, original, predicted):
         """
-        只在滑步帧替换脚部，其他帧保持原样。
-        加入帧间连续性保护：如果 blend 结果会造成速度尖峰则降低 blend 强度。
+        只在滑步帧替换脚部，其他帧保持原样。（V8 原始算法）
 
         original:  (T, 66)  输入动作（带瑕疵）
         predicted: (T, 66)  模型输出（全量重建）
@@ -135,7 +134,6 @@ class MotionFixNetwork(nn.Module):
         """
         output = original.clone()
         T = original.shape[0]
-        max_velocity = 0.10      # 最大允许的帧间速度 (m/frame)
 
         for fj in self.foot_joints:
             dims = [fj * 3, fj * 3 + 1, fj * 3 + 2]
@@ -155,20 +153,8 @@ class MotionFixNetwork(nn.Module):
                     velocity = torch.norm(orig_xz - prev_xz).item()
 
                     if velocity > 0.03:
-                        # --- 在滑动！计算自适应的 blend 强度 ---
+                        # 在滑动！→ 混合修正
                         alpha = self.blend_alpha
-
-                        # 连续性保护：检查 blend 结果会不会造成速度尖峰
-                        for d in dims:
-                            candidate = (1 - alpha) * original[t, d] + alpha * predicted[t, d]
-                            # 与前一帧的速度
-                            vel_to_prev = abs(candidate - output[t-1, d])
-                            if vel_to_prev > max_velocity:
-                                # 降低 alpha 使速度不超过阈值
-                                safe_alpha = max_velocity / max(vel_to_prev, 1e-8)
-                                alpha = min(alpha, safe_alpha.item() if hasattr(safe_alpha, 'item') else safe_alpha)
-
-                        # 应用混合修正
                         for d in dims:
                             output[t, d] = (
                                 (1 - alpha) * original[t, d]
