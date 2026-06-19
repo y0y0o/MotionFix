@@ -1,10 +1,10 @@
 """
-MotionFix V11 - Training Script
+MotionFix V11 (Fixed) - Training Script
 
-V11 改进（修复 V10 抖动问题）:
-  - 重新平衡损失权重: λ_foot 2.0→0.8, λ_smooth 0.3→1.5
-  - 新增 L_UpperVel: 约束上半身速度不变，防止抖动传播
-  - 训练数据复用 V10 的 training_data_v10/
+修复要点:
+  - 训练: foot_only=False, 全量重建
+  - 损失: V8 直接脚部监督 + FRDM 接触门控辅助
+  - 损失权重: 修正力 >> 保守力
 """
 
 import torch
@@ -26,7 +26,8 @@ DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 def train():
     print("=" * 60)
-    print("MotionFix V11 - Training with rebalanced FRDM-style losses")
+    print("MotionFix V11 (Fixed) - Training")
+    print("  V8 selective replace + rebalanced FRDM losses")
     print("=" * 60)
     print(f"Device: {DEVICE}")
     print(f"Data: {DATA_DIR}")
@@ -41,15 +42,18 @@ def train():
     print(f"Samples: {len(dataset)}, Batches/epoch: {len(loader)}")
 
     # ---- 模型 ----
-    model = MotionFixNetwork().to(DEVICE)
+    model = MotionFixNetwork(blend_alpha=0.5).to(DEVICE)
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # ---- 损失 & 优化器 ----
+    # 修正力: λ_foot=2.0, λ_foot_vel=1.0 (直接脚部监督)
+    # 保守力: λ_vel=0.3 (温和速度匹配), λ_foot_ct=0.5 (接触门控辅助)
     criterion = MotionFixLoss(
-        lambda_foot=0.8,
-        lambda_smooth=1.5,
-        lambda_vel_cons=0.1,
-        lambda_upper_vel=0.5,
+        lambda_foot=2.0,
+        lambda_foot_vel=1.0,
+        lambda_vel=0.3,
+        lambda_foot_ct=0.5,
+        lambda_vel_cons=0.2,
     )
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=15, gamma=0.5)
@@ -71,18 +75,20 @@ def train():
         model.train()
         t0 = time.time()
 
-        total_loss = total_recon = total_foot = total_smooth = total_vel = total_upper = 0.0
+        total_loss = total_recon = total_foot = total_foot_ct = total_vel_cons = 0.0
 
         for distorted, target, contact in loader:
             distorted = distorted.to(DEVICE)
             target = target.to(DEVICE)
             contact = contact.to(DEVICE)
 
-            # 统一 forward（无 foot_only 标志）
-            pred = model(distorted)
+            # 训练模式: 全量重建 (foot_only=False)
+            pred = model(distorted, foot_only=False)
 
-            # V11 结构化损失（含上半身速度保持）
-            loss, l_recon, l_foot, l_smooth, l_vel, l_upper = criterion(pred, target, contact)
+            # 混合损失: V8 直接监督 + FRDM 接触门控辅助
+            loss, l_recon, l_foot, l_foot_ct, l_vel_cons = criterion(
+                pred, target, contact
+            )
 
             optimizer.zero_grad()
             loss.backward()
@@ -92,9 +98,8 @@ def train():
             total_loss += loss.item()
             total_recon += l_recon.item()
             total_foot += l_foot.item()
-            total_smooth += l_smooth.item()
-            total_vel += l_vel.item()
-            total_upper += l_upper.item()
+            total_foot_ct += l_foot_ct.item()
+            total_vel_cons += l_vel_cons.item()
 
         scheduler.step()
         n = len(loader)
@@ -106,10 +111,9 @@ def train():
             f"Epoch {epoch+1:3d}/{NUM_EPOCHS} | "
             f"Loss: {total_loss/n:.4f} = "
             f"R:{total_recon/n:.4f} + "
-            f"F:{total_foot/n:.4f} + "
-            f"S:{total_smooth/n:.4f} + "
-            f"V:{total_vel/n:.4f} + "
-            f"U:{total_upper/n:.4f} | "
+            f"Foot:{total_foot/n:.4f} + "
+            f"Ct:{total_foot_ct/n:.4f} + "
+            f"Vc:{total_vel_cons/n:.4f} | "
             f"LR: {lr:.6f} | {elapsed:.1f}s"
         )
 
