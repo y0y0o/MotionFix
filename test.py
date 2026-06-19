@@ -45,8 +45,10 @@ def main():
     model.load_state_dict(ckpt['model_state_dict'])
     print(f"Loaded epoch {ckpt['epoch']+1}, loss {ckpt['loss']:.4f}")
 
-    momask_dir = os.path.expanduser("./momask_results")
-    momask_files = sorted(glob.glob(f"{momask_dir}/momask_*_no_ik.npy"))
+    # momask_dir = os.path.expanduser("./momask_results")
+    # momask_files = sorted(glob.glob(f"{momask_dir}/momask_*_no_ik.npy"))
+    momask_dir = "./momask_50_results/no_ik"
+    momask_files = sorted(glob.glob(f"{momask_dir}/*.npy"))
 
     output_dir = "fixed_outputs"
     os.makedirs(output_dir, exist_ok=True)
