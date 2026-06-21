@@ -56,12 +56,13 @@ KNEE_JOINTS = [4, 5]
 HIP_JOINTS = [1, 2]
 
 # Noise magnitude ranges (FRDM-style, progressively stronger toward feet)
+# V12.1: Scaled up 3-5x to match MoMask artifact magnitudes (~0.4m avg foot error)
 NOISE_CONFIG = {
-    'pelvis':  {'joints': [0],  'pos_std': (0.005, 0.02)},
-    'hips':    {'joints': [1, 2], 'pos_std': (0.005, 0.03)},
-    'knees':   {'joints': [4, 5], 'pos_std': (0.01, 0.05)},
-    'ankles':  {'joints': [7, 8], 'pos_std': (0.02, 0.10)},
-    'feet':    {'joints': [10, 11], 'pos_std': (0.03, 0.15)},
+    'pelvis':  {'joints': [0],  'pos_std': (0.02, 0.08)},
+    'hips':    {'joints': [1, 2], 'pos_std': (0.03, 0.12)},
+    'knees':   {'joints': [4, 5], 'pos_std': (0.05, 0.20)},
+    'ankles':  {'joints': [7, 8], 'pos_std': (0.10, 0.35)},
+    'feet':    {'joints': [10, 11], 'pos_std': (0.15, 0.50)},
 }
 
 
@@ -129,19 +130,19 @@ def add_gaussian_noise_lower(motion, contact, scale=1.0):
         for t in range(motion.shape[0]):
             if contact[t, foot_idx] > 0.5:
                 # Contact frame: extra jitter (simulates physics sim friction error)
-                extra = np.random.randn(3).astype(np.float32) * 0.02 * scale
+                # V12.1: scaled up from 0.02 to 0.08
+                extra = np.random.randn(3).astype(np.float32) * 0.08 * scale
                 distorted[t, fj, :] += extra
 
     return distorted
 
 
-def add_foot_jitter(motion, contact, jitter_std=0.012):
+def add_foot_jitter(motion, contact, jitter_std=0.05):
     """
-    High-frequency small-amplitude jitter on feet.
+    High-frequency jitter on feet.
+    V12.1: increased from 0.012 to 0.05 to match MoMask artifact scale.
     Simulates the "buzzing" artifact from physics simulation
     when friction coefficients don't match real surfaces.
-
-    FRDM specifically targets this artifact type.
     """
     distorted = motion.copy()
     T = motion.shape[0]
@@ -158,9 +159,10 @@ def add_foot_jitter(motion, contact, jitter_std=0.012):
     return distorted
 
 
-def add_foot_skating(motion, contact, skate_mag=0.03):
+def add_foot_skating(motion, contact, skate_mag=0.15):
     """
     Horizontal foot sliding on contact frames.
+    V12.1: increased from 0.03 to 0.15 to match MoMask skating artifact scale.
     Directly simulates the foot skating artifact from VQ-based generators.
     """
     distorted = motion.copy()
@@ -196,10 +198,11 @@ def add_temporal_smoothing_lower(motion, window_size=None):
     return distorted
 
 
-def add_knee_drift(motion, drift_std=0.02):
+def add_knee_drift(motion, drift_std=0.08):
     """
     Slow drift on knee positions — simulates physics simulation
     accumulating errors over time (common in IsaacGym PHC output).
+    V12.1: increased from 0.02 to 0.08.
     """
     distorted = motion.copy()
     T = motion.shape[0]
@@ -307,18 +310,18 @@ def main():
             dist_name, dist_func = distortion_types[idx]
 
             if dist_name == 'gaussian':
-                scale = np.random.uniform(0.5, 1.5)
+                scale = np.random.uniform(0.7, 2.0)
                 distorted = dist_func(real_motion, contact, scale=scale)
             elif dist_name == 'jitter':
-                std = np.random.uniform(0.005, 0.02)
+                std = np.random.uniform(0.02, 0.10)
                 distorted = dist_func(real_motion, contact, jitter_std=std)
             elif dist_name == 'skating':
-                mag = np.random.uniform(0.01, 0.05)
+                mag = np.random.uniform(0.05, 0.25)
                 distorted = dist_func(real_motion, contact, skate_mag=mag)
             elif dist_name == 'smooth':
                 distorted = dist_func(real_motion)
             elif dist_name == 'knee_drift':
-                std = np.random.uniform(0.01, 0.04)
+                std = np.random.uniform(0.04, 0.15)
                 distorted = dist_func(real_motion, drift_std=std)
             else:
                 distorted = dist_func(real_motion, contact)

@@ -140,9 +140,9 @@ def main():
 
     # ---- Load model ----
     model = MotionFixNetworkV12(
-        blend_alpha=0.5,
+        blend_alpha=0.7,
         window_size=2,
-        velocity_gate=0.5,
+        velocity_gate=1.0,
     ).to(device)
     ckpt_path = "checkpoints_v12/best.pth"
     if not os.path.exists(ckpt_path):

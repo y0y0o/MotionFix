@@ -56,6 +56,8 @@ class MotionFixNetworkV12(nn.Module):
 
     Training: foot_only=False → both heads active, full reconstruction
     Inference: foot_only=True → enhanced selective replace on foot joints
+
+    V12.1: blend_alpha 0.5→0.7, velocity_gate 0.5→1.0 (stronger corrections)
     """
 
     def __init__(
@@ -66,9 +68,9 @@ class MotionFixNetworkV12(nn.Module):
         num_encoder_layers=6,
         dim_feedforward=2048,
         dropout=0.1,
-        blend_alpha=0.5,
+        blend_alpha=0.7,
         window_size=2,         # ±window frames for expansion
-        velocity_gate=0.5,     # max allowed jump distance (meters)
+        velocity_gate=1.0,     # max allowed jump distance (meters)
     ):
         super().__init__()
         self.input_dim = input_dim

@@ -48,9 +48,9 @@ def train():
 
     # ---- Model ----
     model = MotionFixNetworkV12(
-        blend_alpha=0.5,
+        blend_alpha=0.7,
         window_size=2,
-        velocity_gate=0.5,
+        velocity_gate=1.0,
     ).to(DEVICE)
     print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
