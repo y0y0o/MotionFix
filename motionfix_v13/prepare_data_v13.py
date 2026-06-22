@@ -136,16 +136,63 @@ def add_pelvis_drift(motion):
     return distorted
 
 
-def add_combined_heavy(motion):
-    """Apply multiple heavy distortions together — worst-case simulation."""
+def add_lower_body_noise(motion):
+    """
+    Broad lower body noise — applies Gaussian noise to ALL lower body joints.
+    This is the main workhorse for creating MoMask-scale artifacts.
+    Target: mean diff ~0.15-0.30m on lower body.
+    """
     distorted = motion.copy()
-    # Apply 2-3 distortions sequentially
+    lower_body = [0, 1, 2, 4, 5, 7, 8, 10, 11]
+    noise_std = np.random.uniform(0.08, 0.20)
+    for j in lower_body:
+        noise = np.random.normal(0, noise_std, (motion.shape[0], 3))
+        distorted[:, j, :] += noise
+    return distorted
+
+
+def add_lower_body_noise_xl(motion):
+    """Extra-large lower body noise for worst-case artifacts."""
+    distorted = motion.copy()
+    lower_body = [0, 1, 2, 4, 5, 7, 8, 10, 11]
+    noise_std = np.random.uniform(0.15, 0.35)
+    for j in lower_body:
+        noise = np.random.normal(0, noise_std, (motion.shape[0], 3))
+        distorted[:, j, :] += noise
+    return distorted
+
+
+def add_combined_heavy(motion):
+    """
+    Apply broad lower body noise + targeted foot distortions.
+    Always applies lower body noise first, then 1-2 targeted distortions.
+    """
+    # Start with broad noise on all lower body
+    distorted = add_lower_body_noise(motion)
+    # Then add 1-2 targeted distortions
     funcs = [
         lambda m: add_foot_skating_heavy(m, intensity=np.random.uniform(0.8, 1.5)),
         add_foot_drift_heavy,
         add_pelvis_drift,
         add_joint_jitter,
         add_y_shift_heavy,
+    ]
+    np.random.shuffle(funcs)
+    for f in funcs[:np.random.randint(1, 3)]:
+        distorted = f(distorted)
+    return distorted
+
+
+def add_combined_xl(motion):
+    """
+    XL version: broad XL noise + multiple targeted distortions.
+    """
+    distorted = add_lower_body_noise_xl(motion)
+    funcs = [
+        lambda m: add_foot_skating_very_heavy(m),
+        add_foot_drift_heavy,
+        add_pelvis_drift,
+        add_joint_jitter,
     ]
     np.random.shuffle(funcs)
     for f in funcs[:np.random.randint(2, 4)]:
@@ -182,25 +229,35 @@ def main():
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # Distortion function list — biased toward heavy skating
-    # V8: 40% skating, 20% drift, 20% smooth, 10% y_shift, 10% noise
-    # V13: 50% heavy skating variants, rest on other distortions
+    # Distortion function list — BIA$ED TOWARD BROAD NOISE
+    # V8: narrow targeted distortions → model learned weak corrections
+    # V13: broad lower body noise + targeted foot distortions
+    #   ~45% broad noise variants → makes model learn meaningful corrections
+    #   ~30% combined (broad + targeted) → worst-case simulation
+    #   ~25% targeted only → preserves specificity
     distortion_funcs = [
-        ('foot_skating_h', add_foot_skating_heavy),        # 20%
-        ('foot_skating_h', add_foot_skating_heavy),
-        ('foot_skating_vh', add_foot_skating_very_heavy),  # 15%
-        ('foot_skating_vh', add_foot_skating_very_heavy),
-        ('foot_drift_h', add_foot_drift_heavy),             # 15%
-        ('foot_drift_h', add_foot_drift_heavy),
-        ('combined_h', add_combined_heavy),                 # 15%
+        # Broad noise (applied to all 9 lower body joints)
+        ('lower_body_noise', add_lower_body_noise),          # 20%
+        ('lower_body_noise', add_lower_body_noise),
+        ('lower_body_noise', add_lower_body_noise),
+        ('lower_body_noise_xl', add_lower_body_noise_xl),    # 10%
+        ('lower_body_noise_xl', add_lower_body_noise_xl),
+        # Combined (broad noise + targeted distortions)
+        ('combined_h', add_combined_heavy),                  # 20%
         ('combined_h', add_combined_heavy),
-        ('temporal_smooth', add_temporal_smoothing),        # 10%
-        ('temporal_smooth', add_temporal_smoothing),
-        ('y_shift_h', add_y_shift_heavy),                  # 10%
-        ('y_shift_h', add_y_shift_heavy),
-        ('spatial_noise_h', add_spatial_noise_heavy),       # 5%
-        ('joint_jitter', add_joint_jitter),                 # 5%
-        ('pelvis_drift', add_pelvis_drift),                 # 5%
+        ('combined_h', add_combined_heavy),
+        ('combined_xl', add_combined_xl),                    # 10%
+        ('combined_xl', add_combined_xl),
+        # Targeted foot distortions (narrow but strong)
+        ('foot_skating_h', add_foot_skating_heavy),          # 10%
+        ('foot_skating_h', add_foot_skating_heavy),
+        ('foot_skating_vh', add_foot_skating_very_heavy),    # 5%
+        ('foot_drift_h', add_foot_drift_heavy),              # 10%
+        ('foot_drift_h', add_foot_drift_heavy),
+        # Other targeted
+        ('y_shift_h', add_y_shift_heavy),                   # 5%
+        ('spatial_noise_h', add_spatial_noise_heavy),        # 5%
+        ('pelvis_drift', add_pelvis_drift),                  # 5%
     ]
 
     print(f"\nGenerating training pairs...")
@@ -229,15 +286,15 @@ def main():
     print("\nValidation — distortion magnitude (on first motion):")
     sample = clean_motions[0]
     for name, func in [
+        ('lower_body_noise', add_lower_body_noise),
+        ('lower_body_noise_xl', add_lower_body_noise_xl),
+        ('combined_h', add_combined_heavy),
+        ('combined_xl', add_combined_xl),
         ('foot_skating_h', add_foot_skating_heavy),
         ('foot_skating_vh', add_foot_skating_very_heavy),
         ('foot_drift_h', add_foot_drift_heavy),
-        ('temporal_smooth', add_temporal_smoothing),
         ('y_shift_h', add_y_shift_heavy),
         ('spatial_noise_h', add_spatial_noise_heavy),
-        ('joint_jitter', add_joint_jitter),
-        ('pelvis_drift', add_pelvis_drift),
-        ('combined_h', add_combined_heavy),
     ]:
         dist = func(sample)
         diff = np.abs(dist - sample).mean()
