@@ -142,7 +142,7 @@ def main():
 
     # Load model
     model = MotionFixNetworkV13(blend_alpha=0.5).to(device)
-    ckpt_path = "checkpoints_v13/best.pth"
+    ckpt_path = "motionfix_v13/checkpoints_v13/best.pth"
     if not os.path.exists(ckpt_path):
         print(f"ERROR: {ckpt_path} not found. Train first.")
         return
