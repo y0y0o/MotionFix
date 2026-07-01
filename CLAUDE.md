@@ -4,11 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-MotionFix is a lightweight post-processing Transformer that corrects **foot skating artifacts** in VQ-based motion generation models (MoMask, T2M-GPT). It operates as a plug-and-play module — no retraining of the generators required.
+MotionFix is a lightweight, generator-agnostic **post-processing pipeline** that removes **foot-skating artifacts** from text-to-motion generators (MoMask, T2M-GPT, MDM) — no retraining of the generators required. It reduces both foot-skating (FSR) and jitter while keeping bone lengths rigid (no leg-tear / foot-flip) and feet in contact.
+
+**Current method (V18 + 2-bone IK)** — a physics + learning hybrid:
+```
+input → De-skate (physics) → Learned smoother (learning) → 2-bone IK (physics) → output
+        plant-at-mean XZ      48.8K-param 1D-CNN            hip→knee→ankle + rigid toe
+        (no drift, low FSR)   (rounds boundaries, low jitter) (rigid bones)
+```
+- **De-skate:** plant foot at per-contact-segment mean XZ — removes skating with no integration drift (reachable target). `models/v18.py::deskate_xz` / `deskated_target`.
+- **Learned smoother:** `models/v18.py::FootRefiner` + `smooth_fix`; trained by `training/v18_ik.py` with a **direct objective** (`λ_jit·acc² + λ_skate·|v|·w³ + λ_anch·anchor`). Trained on MoMask held-out; **generalizes to MDM and T2M-GPT unchanged**.
+- **2-bone IK:** `models/v18_ik.py::two_bone_ik` / `apply_ik` — analytic cosine-rule solve, clamps ankle to leg reach (fixes leg-tear), rigid toe (fixes foot-flip).
+
+**Key result (n=50 each):** MoMask FSR 14.1%→12.7% / Jitter 0.0128→0.0107; MDM 11.9%→11.2% / 0.0142→0.0115; T2M-GPT 12.0%→11.0% / 0.0139→0.0107. BoneCV unchanged, ContactAcc 100% on all. Full derivation in `docs/v18_devlog.md`; results figure `analysis/v18_ik_scale/results.png`.
+
+**Honest finding:** with the IK constraint, FSR↔Jitter is an irreducible trade-off — the learned smoother traces the *same* frontier as a tuned Gaussian (beats Original on both axes, does not Pareto-dominate the analytical filter).
 
 - **Author:** Xin Wan (nxkh91), Durham University
 - **Server:** gpu3, NVIDIA TITAN Xp 12GB
-- **Environment:** `/home3/nxkh91/miniconda3/envs/t2mgpt/bin/python3`, PyTorch 2.1.0+cu121
+- **Environment:** `conda activate t2mgpt` (`/home3/nxkh91/miniconda3/envs/t2mgpt/bin/python3`), PyTorch 2.1.0+cu121
+- **Working dir:** `/home3/nxkh91/projects/motionfix` (run all scripts from repo root)
 
 ## Commands
 
@@ -31,27 +46,27 @@ motionfix/
 └── logs/            # Log files (git-ignored)
 ```
 
-### Training
+### V18 + IK — current method (run from repo root)
 ```bash
-# V8 (stable baseline) — run from repo root
-python data/prep/v2.py              # Generate data/training/v2/ (15K pairs)
-python training/v8.py               # Train V8 → checkpoints/v8/
-
-# V13 (experimental) — run from repo root
-python data/prep/v13.py             # Generate data/training/v13/
-python training/v13.py              # Train V13 → checkpoints/v13/
+python training/v18_ik.py            # Train adaptive smoother → checkpoints/v18_ik/best.pth (~40s)
+python testing/v18_ik.py             # 5-way ablation on MoMask held-out → analysis/v18_ik_viz/
+python testing/v18ik_scale.py        # Cross-generator eval (MoMask/MDM/T2M-GPT, n=50) → analysis/v18_ik_scale/
+python analysis/make_results_chart.py# 4-panel results figure → analysis/v18_ik_scale/results.png
+python utils/render_v18ik.py [names] # Side-by-side Original vs Learned+IK videos → outputs/videos/v18_ik/
 ```
 
-All training scripts automatically resume from `latest.pth` if it exists. To start fresh: `rm -f checkpoints/v*/latest.pth`.
-
-### Testing / Evaluation
+### Legacy training / testing (V8 baseline)
 ```bash
-python testing/v8.py                # V8 evaluation on momask_50
-python testing/v13.py               # V13 evaluation on MoMask + MDM
-python testing/momask.py            # V8 on MoMask 50 prompts
-python testing/mdm.py               # V8 on MDM
-python testing/t2mgpt.py            # V8 on T2M-GPT
+python data/prep/v2.py               # Generate data/training/v2/ (15K pairs)
+python training/v8.py                # Train V8 → checkpoints/v8/
+python testing/v8.py                 # V8 evaluation on momask_50
+python testing/momask.py / mdm.py / t2mgpt.py   # V8 multi-model benchmarks
 ```
+Training scripts auto-resume from `latest.pth`. To start fresh: `rm -f checkpoints/v*/latest.pth`.
+
+### Metrics (`utils/metrics.py`, 7 metrics)
+FSR (foot-skating ratio), Jitter (foot-accel RMS), Floating, FootErr (deviation vs original),
+ContactAcc, BoneCV (bone-length consistency), Penetration.
 
 ### Data
 ```bash
@@ -61,12 +76,13 @@ python data/prep/v13.py             # V13 format: amplified noise
 ```
 Training data is generated from HumanML3D (`/home3/nxkh91/projects/HumanML3D/HumanML3D/new_joint_vecs`). The `convert_to_joints` function uses `recover_from_ric` from `/home3/nxkh91/projects/T2M-GPT/utils/motion_process.py`.
 
-### Auto-sync
-```bash
-./scripts/sync.sh          # Start autosync.py watchdog (auto commit+push)
-pkill -f autosync          # Stop it
-```
-`scripts/autosync.py` watches for file changes and commits after a 120s quiet period. It ignores `data/`, `checkpoints/`, `outputs/`, `logs/`, `*.npy`, `*.log`, and `.git`.
+### Git / commits
+Auto-sync is **disabled** — the `.git/hooks/post-commit` auto-push hook (moved to
+`post-commit.disabled`) produced the noisy `auto-sync: changes at ...` history. Prefer
+manual, meaningful commits. `.gitignore` globally excludes binaries (`*.npy *.pth *.pt
+*.pkl *.mp4`), `logs/`, `__pycache__/`; `analysis/**/*.png` figures ARE tracked.
+The remote URL carries **no token** — push authenticates via credential prompt/helper.
+(Legacy `scripts/autosync.py` + `sync.sh` remain but should stay off.)
 
 ## Architecture
 
@@ -116,12 +132,11 @@ This is the mechanism that makes V8 work — it only modifies foot joints at ska
 
 | Version | Location | Status | Key Trait |
 |---------|----------|--------|-----------|
-| **V8** | `models/v8.py`, `training/v8.py`, `testing/v8.py` | **Stable** | Selective foot replacement, proven ~2.9% FSR reduction |
-| V9 | `models/v9.py`, `training/v9.py` | Current best | Soft gating + IK (separate architecture) |
-| V10 | `models/v10.py`, `training/v10.py`, `data/prep/v10.py` | Stored | Lower-body-only distortions, contact labels |
-| V11 | `models/v11.py`, `training/v11.py` | WIP | V8 loss + selective replace; trained on V2 data |
-| V12 | `models/v12.py`, `training/v12.py` | Stored | FRDM-inspired dual-head output |
-| V13 | `models/v13.py`, `training/v13.py` | WIP | V8 architecture + amplified noise |
+| **V18 + IK** | `models/v18.py`, `models/v18_ik.py`, `training/v18_ik.py`, `testing/v18ik_scale.py` | **CURRENT / final** | De-skate → learned smoother → 2-bone IK; FSR↓ Jitter↓ bones rigid, cross-generator |
+| V18 | `models/v18.py`, `training/v18.py` | Superseded | Velocity-space contact mask (broke FSR-Jitter antagonism) but `cumsum` drift (FootErr 0.39m) |
+| V14–V17 | `models/v14..v17.py` | Diagnostic | Physics baselines + learned smoothers; established the FSR↔Jitter frontier |
+| V8 | `models/v8.py`, `testing/v8.py` | Stable baseline | Selective foot replacement, ~2.9% FSR reduction |
+| V9–V13 | `models/v9..v13.py` | Stored | Soft gating+IK / dual-head / amplified-noise experiments |
 
 ## Key Lessons Learned
 

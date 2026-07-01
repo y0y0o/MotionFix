@@ -1,199 +1,118 @@
-# MotionFix: Foot Skating Correction for VQ-Based Motion Generation
+# MotionFix: Post-Hoc Foot-Skating Correction for VQ-Based Motion Generation
 
-**MotionFix** is a lightweight post-processing neural network that corrects **foot skating artifacts** in VQ-based text-to-motion generation models (MoMask, T2M-GPT). It operates as a plug-and-play module — no retraining of the underlying generation models is required.
+**MotionFix** is a lightweight, generator-agnostic **post-processing** pipeline that removes **foot-skating** artifacts from text-to-motion generators (MoMask, T2M-GPT, MDM) **without retraining** them. It reduces both *foot-skating* and *jitter* while keeping bone lengths rigid (no leg-tear, no foot-flip) and feet in contact.
 
 <p align="center">
-  <b>English</b> | <a href="#motionfix-基于-vq-的动作生成脚步滑动修正">中文</a>
+  <b>English</b> | <a href="#motionfix-基于-vq-的动作生成脚步滑动后处理修正">中文</a>
 </p>
 
 ---
 
 ## Overview
 
-VQ-VAE-based motion generation models (MoMask, T2M-GPT) offer **15–20× faster inference** than diffusion-based approaches, making them ideal for real-time applications. However, they suffer from **foot skating** — feet slide along the ground when they should stay planted during contact phases. MotionFix addresses this with a Transformer-based correction network.
----
-### Project Processing -- Update everyday(maybe)
----
-### Key Features
-
-- **🔥 Selective Correction** — Only modifies foot joints on skating frames; leaves other body parts untouched
-- **⚡ Lightweight** — 19.1M parameters, ~100ms per sequence on GPU
-- **🔌 Plug-and-Play** — Works with any VQ-based motion generator; no retraining needed
-- **🧠 Soft Gating (V9)** — Learned gate network + heuristic cues (height, velocity) for precise artifact localization
-- **🦿 Kinematic IK (V9)** — Leg-chain inverse kinematics ensures knee positions are consistent with corrected ankles
-- **📐 Bone Length Preservation** — Auxiliary loss maintains anatomical consistency
-
-## Architecture
+VQ-VAE motion generators (MoMask, T2M-GPT) are **15–20× faster** than diffusion models but suffer from **foot-skating** — feet slide when they should stay planted. Naive fixes trade one artifact for another: hard-planting the foot kills skating but injects **jitter**; global smoothing kills jitter but re-introduces skating. MotionFix treats correction as a **constraint-satisfaction problem** and combines physics with a small learned model:
 
 ```
-Input (T, 22, 3)
-     │
-     ▼
-Flatten (T, 66)
-     │
-     ▼
-Linear Proj → 512d
-     │
-     ▼
-Positional Encoding (sinusoidal)
-     │
-     ▼
-Transformer Encoder ×6
-  (d_model=512, nhead=8, FFN=2048)
-     │
-     ▼
-Output Proj → 66d
-     │
-     ▼
-Soft Gating + Selective Blend (V9)
-     │
-     ▼
-Leg-Chain IK (inference only)
-     │
-     ▼
-Corrected Motion (T, 22, 3)
+        ┌─────────────┐     ┌────────────────────┐     ┌──────────────┐
+input → │  De-skate   │  →  │  Learned adaptive   │  →  │  2-bone IK   │ → output
+(T,22,3)│  (physics)  │     │  smoother (learning)│     │  (physics)   │  (T,22,3)
+        └─────────────┘     └────────────────────┘     └──────────────┘
+         plant-at-mean        rounds plant→air           hip→knee→ankle
+         (no drift, low FSR)  boundaries (low jitter)     + rigid toe
+                                                          (rigid bones)
 ```
 
-### Skating Ratio
+- **De-skate (physics):** plant the foot at its per-contact-segment mean XZ — removes skating with *no integration drift* (target stays reachable).
+- **Learned smoother (learning):** a 48.8K-param 1D-CNN that adaptively rounds the sharp plant→air velocity boundaries to cut jitter, without re-introducing skating. Trained on MoMask held-out; **generalizes to MDM and T2M-GPT unchanged**.
+- **2-bone IK (physics):** analytic cosine-rule solve on the leg chain (hip→knee→ankle) with a rigid toe. Clamps the ankle target to leg reach — this is what **fixes leg-tear and foot-flip** (bones stay rigid).
 
-| Model | Type | Avg Skating Ratio |
-|-------|------|-------------------|
-| MDM | Diffusion | Lowest (baseline) |
-| MoMask (no IK) | VQ-based | ~13.6% |
-| MoMask (IK) | VQ-based | ~12.7% |
-| **MoMask + MotionFix** | **VQ + Post-process** | **Significantly reduced** |
+## Results (n = 50 per generator)
+
+The **same** pipeline (learned smoother trained only on MoMask) applied post-hoc to three generators:
+
+| Generator | FSR ↓ | Jitter ↓ | BoneCV (bones) | ContactAcc |
+|-----------|:-----:|:--------:|:--------------:|:----------:|
+| **MoMask** | 14.1% → **12.7%** | 0.0128 → **0.0107** | 0.0037 → 0.0037 | 100% |
+| **MDM** | 11.9% → **11.2%** | 0.0142 → **0.0115** | 0.0149 → 0.0149 | 100% |
+| **T2M-GPT** | 12.0% → **11.0%** | 0.0139 → **0.0107** | 0.0294 → 0.0294 | 100% |
+
+Every generator: **FSR and Jitter both drop, bone lengths unchanged (no leg-tear / foot-flip), 100% contact preserved.**
+
+**Honest finding.** Once the skeleton is IK-constrained, FSR ↔ Jitter is an *irreducible* trade-off: the learned smoother traces the **same FSR–Jitter frontier** as a tuned Gaussian (it lets you pick the operating point and beats the original on both axes, but does not Pareto-dominate the analytical filter). This is consistent with the framing that post-hoc foot-skating correction is a constraint-satisfaction problem whose ceiling is set by skeletal reachability, not the generator.
+
+See `analysis/v18_ik_scale/results.png` for the 4-panel figure and `docs/v18_devlog.md` for the full derivation (including three learned-smoother training failures and their fix).
+
+## Evaluation Metrics (7)
+
+`utils/metrics.py`: **FSR** (foot-skating ratio), **Jitter** (foot-accel RMS), **Floating**, **FootErr** (deviation vs original), **ContactAcc**, **BoneCV** (bone-length consistency), **Penetration**.
 
 ## Project Structure
 
 ```
 motionfix/
-├── motionfix_model.py       # V8: Selective foot replacement (baseline)
-├── motionfix_model_v9.py    # V9: Soft gating + temporal smooth + kinematic IK
-├── motionfix_v6.py          # V6: Earlier iteration
-├── train.py                 # V8 training script
-├── train_v9.py              # V9 training script
-├── dataset.py               # PyTorch Dataset for motion pairs
-├── prepare_data.py          # Generate training pairs from HumanML3D
-├── prepare_data_v2.py       # V2 data preparation
-├── test.py                  # V8 evaluation on MoMask outputs
-├── test_v3.py / test_v5.py / test_v9.py  # Version-specific test scripts
-├── test_mdm.py / test_momask.py / test_t2mgpt.py  # Multi-model benchmarks
-├── diagnose.py              # Debug/diagnostic tool
-├── visualize_comparison.py  # Motion visualization
-├── autosync.py              # Auto-commit & push watchdog
-├── sync.sh                  # Launcher script for autosync
-│
-├── motionfix_v10/           # V10 experiments (latest iteration)
-├── motionfix_v11/           # V11 experiments (work in progress)
-│
-├── fixed_outputs*/          # Corrected motion outputs (various versions)
-├── momask_results/          # Raw MoMask outputs for comparison
-├── t2mgpt_raw_joints/       # Raw T2M-GPT outputs
-├── mdm_raw_joints/          # Raw MDM outputs
-│
-└── checkpoints*/            # Model weights (*.pth, excluded from git)
+├── models/            # Model definitions (v8–v18, v18_ik = the IK core)
+├── data/
+│   ├── prep/          # Training-pair generation (v1–v15)
+│   ├── datasets/      # PyTorch Dataset classes
+│   ├── training/      # Training data (.npy — git-ignored)
+│   └── test_inputs/   # Generator outputs: momask_50 / mdm / t2mgpt (git-ignored)
+├── training/          # Training entry-points (training/v18_ik.py = final)
+├── testing/           # Eval scripts (testing/v18ik_scale.py = cross-generator)
+├── analysis/          # Analysis scripts + result figures (*.png tracked)
+├── utils/             # metrics.py, physics_fix.py, render_v18ik.py
+├── checkpoints/       # Weights (.pth — git-ignored)
+├── outputs/           # Fixed motions / videos (git-ignored)
+├── docs/              # v18_devlog.md, research logs
+└── CLAUDE.md          # Detailed dev guidance
 ```
 
 ## Quick Start
 
-### Requirements
-
-```bash
-pip install torch numpy scipy
-```
-
-### Fix a Motion
+Environment: `conda activate t2mgpt` (PyTorch 2.1.0+cu121). Run all scripts from the repo root.
 
 ```python
-import torch
-import numpy as np
-from motionfix_model_v9 import MotionFixNetworkV9
+import torch, numpy as np
+from models.v18 import FootRefiner, smooth_fix
+from models.v18_ik import apply_ik
 
-# Load model
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model = MotionFixNetworkV9(blend_alpha=0.5, temperature=0.01).to(device)
-ckpt = torch.load("checkpoints_v9/best.pth", map_location=device)
-model.load_state_dict(ckpt['model_state_dict'])
+model = FootRefiner().to(device)
+model.load_state_dict(torch.load("checkpoints/v18_ik/best.pth", map_location=device)['model_state_dict'])
 model.eval()
 
-# Load a motion: shape (T, 22, 3)
-motion = np.load("your_motion.npy")  # (T, 22, 3)
-
-# Fix it
-T = motion.shape[0]
-motion_flat = motion.reshape(T, -1)  # (T, 66)
-motion_tensor = torch.FloatTensor(motion_flat).unsqueeze(0).to(device)
-
-with torch.no_grad():
-    fixed = model(motion_tensor, foot_only=True)
-
-fixed_motion = fixed.squeeze(0).cpu().numpy().reshape(T, 22, 3)
-np.save("your_motion_fixed.npy", fixed_motion)
+motion = np.load("your_motion.npy").astype(np.float32)   # (T, 22, 3)
+fixed  = apply_ik(motion, smooth_fix(motion, model, device))   # de-skate → smooth → IK
+np.save("your_motion_fixed.npy", fixed)
 ```
 
-### Evaluate Skating Ratio
-
-```python
-from test import detect_skating
-sr_before = detect_skating(motion)
-sr_after = detect_skating(fixed_motion)
-print(f"Skating: {sr_before:.1%} → {sr_after:.1%}")
-```
-
-### Train from Scratch
+### Train / Evaluate / Render
 
 ```bash
-# Step 1: Prepare training data
-python prepare_data_v2.py
-
-# Step 2: Train
-python train_v9.py
-
-# Step 3: Evaluate
-python test_v9.py
+python training/v18_ik.py       # train the adaptive smoother → checkpoints/v18_ik/best.pth
+python testing/v18ik_scale.py   # cross-generator eval (MoMask/MDM/T2M-GPT, n=50) → analysis/v18_ik_scale/
+python analysis/make_results_chart.py   # 4-panel results figure
+python utils/render_v18ik.py    # side-by-side Original vs Learned+IK videos → outputs/videos/v18_ik/
 ```
 
-## Model Versions
+## Method Evolution
 
-| Version | Key Innovation | Status |
-|---------|---------------|--------|
-| V3 | Basic Transformer encoder, L1 + velocity + foot loss | Baseline |
-| V5 | Added bone length preservation loss | Improved |
-| V6 | Architecture refinements | Iteration |
-| V7 | Hyperparameter tuning | Iteration |
-| **V8** | **Selective foot replacement (train full, infer partial)** | **Stable** |
-| **V9** | **Soft gating + temporal smoothing + kinematic IK** | **Current best** |
-| V10 | Further experiments | In progress |
-| V11 | Iterative refinement (3-pass) | In progress |
+| Stage | Versions | Lesson |
+|-------|----------|--------|
+| Diagnosis | V8–V17 | Why learning fails: FSR↔Jitter antagonism, metric gaming, jitter blow-up |
+| Break the antagonism | V18 | Velocity-space contact mask → low FSR *and* low jitter, but `cumsum` integration **drift** (FootErr 0.39 m) |
+| **Final** | **V18 + 2-bone IK** | De-skate (no drift) + IK (rigid bones) + direct-objective learned smoother → FSR↓, Jitter↓, bones intact |
 
-## Training Data
+## Data
 
-Training pairs are generated from the [HumanML3D](https://github.com/EricGuo5513/HumanML3D) dataset. Three distortion types are applied to create (distorted, clean) pairs:
+Training pairs generated from [HumanML3D](https://github.com/EricGuo5513/HumanML3D). All motions are **22-joint, 3D world-coordinate** positions, shape `(T, 22, 3)`. Foot joints: **7, 8 (ankles), 10, 11 (toes)**.
 
-1. **Temporal Smoothing** — Gaussian filter on joint trajectories (window 3–7)
-2. **Y-Shift** — Random vertical translation (±5cm)
-3. **Spatial Noise** — Gaussian noise (σ = 0.005–0.02)
+## Citation
 
-## Loss Function (V9)
-
-$$\mathcal{L} = \mathcal{L}_{L1} + \lambda_{vel}\mathcal{L}_{vel} + \lambda_{foot}(\mathcal{L}_{foot} + \mathcal{L}_{foot\_vel}) + \lambda_{bone}\mathcal{L}_{bone} + 0.5\mathcal{L}_{contact\_vel}$$
-
-| Term | Purpose |
-|------|---------|
-| $\mathcal{L}_{L1}$ | Overall reconstruction |
-| $\mathcal{L}_{vel}$ | Temporal smoothness |
-| $\mathcal{L}_{foot}$ | Foot position accuracy |
-| $\mathcal{L}_{foot\_vel}$ | Foot velocity consistency |
-| $\mathcal{L}_{bone}$ | Bone length preservation (22 pairs) |
-| $\mathcal{L}_{contact\_vel}$ | Zero-velocity during ground contact |
-
-## License & Citation
-
-This project is part of ongoing research at Durham University. If you use MotionFix in your work, please cite:
+Part of ongoing MSc research at Durham University.
 
 ```bibtex
 @misc{wan2026motionfix,
-  title={MotionFix: Foot Skating Correction for VQ-Based Motion Generation},
+  title={MotionFix: Post-Hoc Foot-Skating Correction for VQ-Based Motion Generation},
   author={Wan, Xin},
   year={2026},
   note={Durham University}
@@ -202,128 +121,107 @@ This project is part of ongoing research at Durham University. If you use Motion
 
 ---
 
-# MotionFix: 基于 VQ 的动作生成脚步滑动修正
+# MotionFix: 基于 VQ 的动作生成脚步滑动后处理修正
 
-**MotionFix** 是一个轻量级后处理神经网络，用于修正基于 VQ 的文本到动作生成模型（MoMask、T2M-GPT）中的**脚步滑动伪影**。它作为即插即用模块工作——无需重新训练底层的生成模型。
----
-### 项目仍在进行中 - 每日更新（大概）
----
+**MotionFix** 是一个轻量、与生成器无关的**后处理**管线,用于消除文本到动作生成器(MoMask、T2M-GPT、MDM)的**脚步滑动**伪影,**无需重新训练**生成器。它在同时降低*脚滑*与*抖动*的同时,保持骨长刚性(不扯腿、不翻脚)、脚部接触不变。
+
 ## 概述
 
-基于 VQ-VAE 的动作生成模型推理速度比扩散模型快 **15–20 倍**，但在脚部接触地面时会出现滑动现象。MotionFix 通过一个 Transformer 修正网络来解决这个问题。
+基于 VQ 的生成器比扩散模型快 **15–20 倍**,但存在**脚步滑动**——脚该踩住时却在滑。朴素修法会拆东补西:硬钉脚消除滑动却引入**抖动**;全局平滑消除抖动却重新引入滑动。MotionFix 把修正视为**约束满足问题**,用物理 + 小型学习模型结合:
 
-### 核心特性
+```
+输入 → 去滑(物理) → 学习自适应平滑(学习) → 2-bone IK(物理) → 输出
+       plant-at-mean   圆滑 踩→抬 边界        髋→膝→踝 + 刚性脚趾
+       (无漂移,低FSR)  (低抖动)              (骨骼刚性)
+```
 
-- **🔥 选择性修正** — 仅修改滑动帧上的脚部关节；其他身体部位保持不变
-- **⚡ 轻量化** — 1910 万参数，GPU 上每序列约 100ms
-- **🔌 即插即用** — 适用于任何 VQ 动作生成器；无需重新训练
-- **🧠 软门控 (V9)** — 可学习门控网络 + 启发式线索（高度、速度）精准定位伪影
-- **🦿 运动学 IK (V9)** — 腿部骨骼链逆运动学确保膝盖位置与修正后的脚踝一致
-- **📐 骨骼长度保持** — 辅助损失函数维持解剖学一致性
+- **去滑(物理):** 把脚钉在每个接触段的 XZ 均值——消除滑动且**无积分漂移**(目标可达)。
+- **学习平滑(学习):** 4.88 万参数的 1D-CNN,自适应圆滑"踩→抬"的速度突变以降抖动,又不重新引入滑动。**仅在 MoMask 上训练,直接泛化到 MDM 与 T2M-GPT**。
+- **2-bone IK(物理):** 腿链(髋→膝→踝)解析余弦定理求解 + 刚性脚趾,将踝目标钳制到腿长可达范围——这是**修复扯腿与翻脚**的关键(骨长保持刚性)。
 
-### 滑动率对比
+## 结果(每个生成器 n = 50)
 
-| 模型 | 类型 | 平均滑动率 |
-|------|------|-----------|
-| MDM | 扩散模型 | 最低（基准） |
-| MoMask（无 IK） | VQ | ~13.6% |
-| MoMask（带 IK） | VQ | ~12.7% |
-| **MoMask + MotionFix** | **VQ + 后处理** | **显著降低** |
+**同一个**管线(平滑器仅在 MoMask 上训练)后处理三个生成器:
+
+| 生成器 | FSR ↓ | Jitter ↓ | BoneCV(骨长) | ContactAcc |
+|--------|:-----:|:--------:|:------------:|:----------:|
+| **MoMask** | 14.1% → **12.7%** | 0.0128 → **0.0107** | 0.0037 → 0.0037 | 100% |
+| **MDM** | 11.9% → **11.2%** | 0.0142 → **0.0115** | 0.0149 → 0.0149 | 100% |
+| **T2M-GPT** | 12.0% → **11.0%** | 0.0139 → **0.0107** | 0.0294 → 0.0294 | 100% |
+
+每个生成器:**FSR 与 Jitter 同时下降,骨长不变(不扯腿/翻脚),接触 100% 保持。**
+
+**诚实的发现。** 骨架被 IK 约束后,FSR ↔ Jitter 是**不可消除**的权衡:学习平滑器与调好的高斯滤波落在**同一条 FSR–Jitter 前沿**上(它让你自选工作点、双指标击败原始,但不 Pareto 碾压解析滤波)。这印证了"后处理脚滑修正是约束满足问题,天花板由骨架可达性决定,而非生成器"的论断。
+
+四面板图见 `analysis/v18_ik_scale/results.png`,完整推导(含学习平滑器三次训练失败与修复)见 `docs/v18_devlog.md`。
+
+## 评测指标(7 个)
+
+`utils/metrics.py`:**FSR**(脚滑率)、**Jitter**(脚部加速度 RMS)、**Floating**(浮空)、**FootErr**(相对原始的偏移)、**ContactAcc**(接触准确率)、**BoneCV**(骨长一致性)、**Penetration**(穿地)。
 
 ## 项目结构
 
 ```
 motionfix/
-├── motionfix_model.py       # V8：选择性脚部替换（基线版本）
-├── motionfix_model_v9.py    # V9：软门控 + 时间平滑 + 运动学 IK
-├── motionfix_v6.py          # V6：早期迭代
-├── train.py / train_v9.py   # 训练脚本
-├── dataset.py               # PyTorch 数据集类
-├── prepare_data.py          # 从 HumanML3D 生成训练数据对
-├── test.py                  # V8 评估脚本
-├── test_mdm.py / test_momask.py / test_t2mgpt.py  # 多模型基准测试
-├── diagnose.py              # 诊断调试工具
-├── visualize_comparison.py  # 动作可视化
-├── autosync.py              # 自动 commit + push 监听脚本
-├── sync.sh                  # autosync 启动脚本
-│
-├── motionfix_v10/           # V10 实验（最新迭代）
-├── motionfix_v11/           # V11 实验（进行中）
-│
-├── fixed_outputs*/          # 修正后的动作输出
-├── momask_results/          # MoMask 原始输出
-├── t2mgpt_raw_joints/       # T2M-GPT 原始输出
-└── mdm_raw_joints/          # MDM 原始输出
+├── models/            # 模型定义(v8–v18,v18_ik = IK 核心)
+├── data/
+│   ├── prep/          # 训练数据对生成(v1–v15)
+│   ├── datasets/      # PyTorch 数据集类
+│   ├── training/      # 训练数据(.npy,git 忽略)
+│   └── test_inputs/   # 生成器输出:momask_50 / mdm / t2mgpt(git 忽略)
+├── training/          # 训练入口(training/v18_ik.py = 最终)
+├── testing/           # 评测脚本(testing/v18ik_scale.py = 跨生成器)
+├── analysis/          # 分析脚本 + 结果图(*.png 跟踪)
+├── utils/             # metrics.py, physics_fix.py, render_v18ik.py
+├── checkpoints/       # 权重(.pth,git 忽略)
+├── outputs/           # 修正动作 / 视频(git 忽略)
+├── docs/              # v18_devlog.md, 研究日志
+└── CLAUDE.md          # 详细开发指南
 ```
 
 ## 快速开始
 
-### 环境依赖
-
-```bash
-pip install torch numpy scipy
-```
-
-### 修正一个动作
+环境:`conda activate t2mgpt`(PyTorch 2.1.0+cu121)。所有脚本从仓库根目录运行。
 
 ```python
-import torch
-import numpy as np
-from motionfix_model_v9 import MotionFixNetworkV9
+import torch, numpy as np
+from models.v18 import FootRefiner, smooth_fix
+from models.v18_ik import apply_ik
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model = MotionFixNetworkV9(blend_alpha=0.5, temperature=0.01).to(device)
-ckpt = torch.load("checkpoints_v9/best.pth", map_location=device)
-model.load_state_dict(ckpt['model_state_dict'])
+model = FootRefiner().to(device)
+model.load_state_dict(torch.load("checkpoints/v18_ik/best.pth", map_location=device)['model_state_dict'])
 model.eval()
 
-motion = np.load("your_motion.npy")  # (T, 22, 3)
-T = motion.shape[0]
-motion_tensor = torch.FloatTensor(
-    motion.reshape(T, -1)
-).unsqueeze(0).to(device)
-
-with torch.no_grad():
-    fixed = model(motion_tensor, foot_only=True)
-
-fixed_motion = fixed.squeeze(0).cpu().numpy().reshape(T, 22, 3)
-np.save("your_motion_fixed.npy", fixed_motion)
+motion = np.load("your_motion.npy").astype(np.float32)   # (T, 22, 3)
+fixed  = apply_ik(motion, smooth_fix(motion, model, device))   # 去滑 → 平滑 → IK
+np.save("your_motion_fixed.npy", fixed)
 ```
 
-### 从头训练
+### 训练 / 评测 / 渲染
 
 ```bash
-python prepare_data_v2.py   # 准备训练数据
-python train_v9.py           # 训练模型
-python test_v9.py            # 评估效果
+python training/v18_ik.py       # 训练自适应平滑器 → checkpoints/v18_ik/best.pth
+python testing/v18ik_scale.py   # 跨生成器评测(MoMask/MDM/T2M-GPT,n=50)→ analysis/v18_ik_scale/
+python analysis/make_results_chart.py   # 四面板结果图
+python utils/render_v18ik.py    # 并排 Original vs Learned+IK 视频 → outputs/videos/v18_ik/
 ```
 
-## 模型版本演进
+## 方法演进
 
-| 版本 | 关键创新 | 状态 |
-|------|---------|------|
-| V3 | 基础 Transformer，L1 + 速度 + 脚部损失 | 基线 |
-| V5 | 增加骨骼长度保持损失 | 改进 |
-| **V8** | **选择性脚部替换（全量训练，局部推理）** | **稳定** |
-| **V9** | **软门控 + 时间平滑 + 运动学 IK** | **当前最优** |
-| V10 | 进一步实验优化 | 进行中 |
-| V11 | 迭代修正（3轮） | 进行中 |
-
-## 训练数据
-
-训练数据对从 [HumanML3D](https://github.com/EricGuo5513/HumanML3D) 数据集生成，使用三种扰动方式：
-
-1. **时序平滑** — 对关节轨迹应用高斯滤波（窗口 3–7）
-2. **Y 轴偏移** — 随机垂直平移（±5cm）
-3. **空间噪声** — 高斯噪声（σ = 0.005–0.02）
+| 阶段 | 版本 | 教训 |
+|------|------|------|
+| 诊断 | V8–V17 | 学习为何失败:FSR↔Jitter 对抗、指标作弊、抖动爆炸 |
+| 打破对抗 | V18 | 速度空间接触掩码 → FSR 与抖动同时低,但 `cumsum` 积分**漂移**(FootErr 0.39 m) |
+| **最终** | **V18 + 2-bone IK** | 去滑(无漂移)+ IK(骨骼刚性)+ 直接目标学习平滑器 → FSR↓、Jitter↓、骨骼完好 |
 
 ## 引用
 
-本项目是杜伦大学（Durham University）正在进行的研究的一部分：
+杜伦大学硕士研究的一部分。
 
 ```bibtex
 @misc{wan2026motionfix,
-  title={MotionFix: Foot Skating Correction for VQ-Based Motion Generation},
+  title={MotionFix: Post-Hoc Foot-Skating Correction for VQ-Based Motion Generation},
   author={Wan, Xin},
   year={2026},
   note={Durham University}
