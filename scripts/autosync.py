@@ -104,14 +104,26 @@ def git_commit_and_push():
         return False
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    message = f"auto-sync: changes at {timestamp}"
+    # Build a useful message: counts + up to 8 changed paths (A/M/D/R)
+    stat = subprocess.run(
+        ["git", "diff", "--cached", "--name-status"],
+        cwd=WATCH_DIR, capture_output=True, text=True,
+    ).stdout.strip().splitlines()
+    n_a = sum(1 for l in stat if l.startswith("A"))
+    n_m = sum(1 for l in stat if l.startswith("M"))
+    n_d = sum(1 for l in stat if l.startswith("D"))
+    n_r = sum(1 for l in stat if l.startswith("R"))
+    summary = f"+{n_a} ~{n_m} -{n_d}" + (f" R{n_r}" if n_r else "")
+    paths = [l.split("\t")[-1] for l in stat[:8]]
+    body = "\n".join(paths) + ("\n…" if len(stat) > 8 else "")
+    message = f"auto-sync ({summary}) {timestamp}\n\n{body}"
 
     subprocess.run(
         ["git", "commit", "-m", message],
         cwd=WATCH_DIR,
         capture_output=True,
     )
-    # post-commit hook will auto-push, but let's also explicitly push
+    # explicit push (post-commit auto-push hook is disabled)
     subprocess.run(
         ["git", "push", "origin", "main"],
         cwd=WATCH_DIR,
