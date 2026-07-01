@@ -12,39 +12,61 @@ MotionFix is a lightweight post-processing Transformer that corrects **foot skat
 
 ## Commands
 
+### Directory Structure
+```
+motionfix/
+├── models/          # Model definitions (v8-v13)
+├── data/datasets/   # Dataset classes
+├── data/prep/       # Data preparation scripts
+├── data/training/   # Training data (.npy, git-ignored)
+├── data/test_inputs/# Input motion data (git-ignored)
+├── training/        # Training entry-point scripts
+├── testing/         # Test/evaluation scripts
+├── checkpoints/     # Model weights (.pth, git-ignored)
+├── outputs/         # Generated outputs (git-ignored)
+├── analysis/        # Analysis scripts & results
+├── utils/           # Utility scripts
+├── scripts/         # Shell/automation scripts
+├── docs/            # Documentation & reports
+└── logs/            # Log files (git-ignored)
+```
+
 ### Training
 ```bash
 # V8 (stable baseline) — run from repo root
-python prepare_data_v2.py          # Generate training_data_v2/ (15K pairs, 45K files)
-python train.py                     # Train V8 → checkpoints_v8/
+python data/prep/v2.py              # Generate data/training/v2/ (15K pairs)
+python training/v8.py               # Train V8 → checkpoints/v8/
 
-# V11 (experimental) — run from motionfix_v11/
-cd motionfix_v11
-python ../prepare_data.py           # Or use existing training_data_v10/
-python train.py                     # Train V11 → checkpoints_v11/
+# V13 (experimental) — run from repo root
+python data/prep/v13.py             # Generate data/training/v13/
+python training/v13.py              # Train V13 → checkpoints/v13/
 ```
 
-All training scripts automatically resume from `latest.pth` if it exists. To start fresh: `rm -f checkpoints_v*/latest.pth`.
+All training scripts automatically resume from `latest.pth` if it exists. To start fresh: `rm -f checkpoints/v*/latest.pth`.
 
 ### Testing / Evaluation
 ```bash
-python test.py                      # V8 evaluation on momask_results/
-cd motionfix_v11 && python test.py  # V11 evaluation on momask_50_results/no_ik/
+python testing/v8.py                # V8 evaluation on momask_50
+python testing/v13.py               # V13 evaluation on MoMask + MDM
+python testing/momask.py            # V8 on MoMask 50 prompts
+python testing/mdm.py               # V8 on MDM
+python testing/t2mgpt.py            # V8 on T2M-GPT
 ```
 
 ### Data
 ```bash
-python prepare_data_v2.py           # V2 format: distorted_*.npy + target_*.npy
-python motionfix_v10/prepare_data.py # V10 format: distorted_*.npy + target_*.npy + contact_*.npy
+python data/prep/v2.py              # V2 format: distorted_*.npy + target_*.npy
+python data/prep/v10.py             # V10 format: distorted + target + contact
+python data/prep/v13.py             # V13 format: amplified noise
 ```
-Training data is generated from HumanML3D (`/home3/nxkh91/HumanML3D/HumanML3D/new_joint_vecs`). The `convert_to_joints` function uses `recover_from_ric` from `/home3/nxkh91/Project/T2M-GPT/utils/motion_process.py`.
+Training data is generated from HumanML3D (`/home3/nxkh91/projects/HumanML3D/HumanML3D/new_joint_vecs`). The `convert_to_joints` function uses `recover_from_ric` from `/home3/nxkh91/projects/T2M-GPT/utils/motion_process.py`.
 
 ### Auto-sync
 ```bash
-./sync.sh          # Start autosync.py watchdog (auto commit+push)
-pkill -f autosync  # Stop it
+./scripts/sync.sh          # Start autosync.py watchdog (auto commit+push)
+pkill -f autosync          # Stop it
 ```
-`autosync.py` watches for file changes and commits after a 120s quiet period. It ignores `training_data*`, `checkpoints*`, `fixed_outputs*`, `*.npy`, `*.log`, and `.git`.
+`scripts/autosync.py` watches for file changes and commits after a 120s quiet period. It ignores `data/`, `checkpoints/`, `outputs/`, `logs/`, `*.npy`, `*.log`, and `.git`.
 
 ## Architecture
 
@@ -94,10 +116,12 @@ This is the mechanism that makes V8 work — it only modifies foot joints at ska
 
 | Version | Location | Status | Key Trait |
 |---------|----------|--------|-----------|
-| **V8** | `motionfix_model.py`, `train.py`, `test.py` | **Stable** | Selective foot replacement, proven ~2.9% FSR reduction on momask_results |
-| V9 | `motionfix_model_v9.py`, `train_v9.py` | Current best | Soft gating + IK (separate architecture) |
-| V10 | `motionfix_v10/` | Stored | Lower-body-only distortions, contact labels |
-| V11 | `motionfix_v11/` | WIP | Currently fixed to match V8 loss + selective replace; trained on V2 data |
+| **V8** | `models/v8.py`, `training/v8.py`, `testing/v8.py` | **Stable** | Selective foot replacement, proven ~2.9% FSR reduction |
+| V9 | `models/v9.py`, `training/v9.py` | Current best | Soft gating + IK (separate architecture) |
+| V10 | `models/v10.py`, `training/v10.py`, `data/prep/v10.py` | Stored | Lower-body-only distortions, contact labels |
+| V11 | `models/v11.py`, `training/v11.py` | WIP | V8 loss + selective replace; trained on V2 data |
+| V12 | `models/v12.py`, `training/v12.py` | Stored | FRDM-inspired dual-head output |
+| V13 | `models/v13.py`, `training/v13.py` | WIP | V8 architecture + amplified noise |
 
 ## Key Lessons Learned
 
@@ -105,7 +129,7 @@ This is the mechanism that makes V8 work — it only modifies foot joints at ska
 
 2. **Loss weight balance matters.** Corrective force (L_foot, L_recon) must exceed conservative force (L_smooth, L_upper_vel). V11's original FRDM-style losses had 2.0 conservative vs ~1.5 corrective.
 
-3. **Training data distribution must match test data.** V10's lower-body-only tiny distortions (0.005–0.02) produced a model that over-reacts to MoMask's larger artifacts. V2's all-joint distortions with Y-shift (±5cm) create a more robust model.
+3. **Training data distribution must match test data.** V10's lower-body-only tiny distortions (0.005–0.02) produced a model that over-reacts to MoMask's larger artifacts. V2's all-joint distortions with Y-shift (±5cm) create a more robust model. (V10 code in `data/prep/v10.py`)
 
 4. **Both V8 and V11 produce large full-prediction foot errors (~0.9m L1)** on MoMask data. The selective replace mechanism succeeds *despite* these errors by only applying corrections at detected skating frames with blend_alpha=0.5. The jitter issue (7x increase) is inherent to frame-discrete blending.
 
@@ -114,6 +138,6 @@ This is the mechanism that makes V8 work — it only modifies foot joints at ska
 ## Dependencies
 
 - **Python packages:** `torch`, `numpy`, `scipy` (scipy.ndimage.uniform_filter1d)
-- **External path:** `/home3/nxkh91/Project/T2M-GPT/utils/motion_process.py` — `recover_from_ric()` for 263d → joint conversion
-- **Data:** HumanML3D at `/home3/nxkh91/HumanML3D/HumanML3D/new_joint_vecs`
-- **Normalization:** `t2m_mean.npy`, `t2m_std.npy` at `/home3/nxkh91/motion-diffusion-model-main/dataset/`
+- **External path:** `/home3/nxkh91/projects/T2M-GPT/utils/motion_process.py` — `recover_from_ric()` for 263d → joint conversion
+- **Data:** HumanML3D at `/home3/nxkh91/projects/HumanML3D/HumanML3D/new_joint_vecs`
+- **Normalization:** `t2m_mean.npy`, `t2m_std.npy` at `/home3/nxkh91/projects/mdm/dataset/`

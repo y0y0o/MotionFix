@@ -1,0 +1,18 @@
+{
+  "n_motions": 50,
+  "FSR": {
+    "before_mean": 0.1405063149637428,
+    "after_mean": 0.09538678776260083,
+    "delta_mean": -0.04511952720114197,
+    "improved_count": 41,
+    "worsened_count": 1
+  },
+  "Jitter": {
+    "before_mean": 0.012843996309675277,
+    "after_mean": 0.03466271474026143,
+    "ratio": 2.6987484194580698
+  },
+  "FootErr": 0.015697032717266666,
+  "Floating": 0.0,
+  "BoneCV": 0.033196690422482786
+}

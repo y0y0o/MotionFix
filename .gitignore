@@ -1,16 +1,30 @@
-# Model checkpoints (too large for GitHub)
-**/checkpoints*/
-**/checkpoints_v*/
+# ── Binary data / weights (NEVER track — keep repo small) ──
+# Global rules: no motion data, weights, packed tensors, or videos anywhere.
+*.npy
+*.npz
+*.pth
+*.pt
+*.pkl
+*.mp4
 
-# Training data (too large)
-**/training_data*/
-**/training_data_v*/
+# Large generated result images live under outputs/ (analysis/*.png IS tracked
+# on purpose — those are the dissertation figures).
+outputs/**/*.png
 
-# Python cache
+# ── Python ──
 __pycache__/
 *.pyc
 *.pyo
 
-# Misc
-.DS_Store
+# ── Logs ──
+logs/
 *.log
+
+# ── Misc ──
+.DS_Store
+
+# ── Old pre-reorg version subdirs (leftover __pycache__ etc.) ──
+motionfix_v10/
+motionfix_v11/
+motionfix_v12/
+motionfix_v13/
