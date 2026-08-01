@@ -6,19 +6,52 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 MotionFix is a lightweight, generator-agnostic **post-processing pipeline** that removes **foot-skating artifacts** from text-to-motion generators (MoMask, T2M-GPT, MDM) — no retraining of the generators required. It reduces both foot-skating (FSR) and jitter while keeping bone lengths rigid (no leg-tear / foot-flip) and feet in contact.
 
-**Current method (V18 + 2-bone IK)** — a physics + learning hybrid:
+**Current method (V19)** — same three-stage pipeline, correctly trained:
 ```
-input → De-skate (physics) → Learned smoother (learning) → 2-bone IK (physics) → output
-        plant-at-mean XZ      48.8K-param 1D-CNN            hip→knee→ankle + rigid toe
-        (no drift, low FSR)   (rounds boundaries, low jitter) (rigid bones)
+input -> De-skate (physics) -> Learned smoother (learning) -> 2-bone IK (physics) -> output
+        plant-at-mean XZ      46.3K 1D-CNN, ankles only      hip->knee->ankle + rigid toe
+        (no drift, low FSR)   (IK is INSIDE its training loop) (rigid bones)
 ```
-- **De-skate:** plant foot at per-contact-segment mean XZ — removes skating with no integration drift (reachable target). `models/v18.py::deskate_xz` / `deskated_target`.
-- **Learned smoother:** `models/v18.py::FootRefiner` + `smooth_fix`; trained by `training/v18_ik.py` with a **direct objective** (`λ_jit·acc² + λ_skate·|v|·w³ + λ_anch·anchor`). Trained on MoMask held-out; **generalizes to MDM and T2M-GPT unchanged**.
-- **2-bone IK:** `models/v18_ik.py::two_bone_ik` / `apply_ik` — analytic cosine-rule solve, clamps ankle to leg reach (fixes leg-tear), rigid toe (fixes foot-flip).
+- **De-skate:** plant foot at per-contact-segment mean XZ. `models/v18.py::deskate_xz`.
+- **Learned smoother:** `models/v19.py::V19Smoother`; loss is contact-partitioned and
+  threshold-aligned to FSR (`soft_count(|v| > 0.03)`, not a mean), with the differentiable
+  ankle clamp `torch_ankle_ik` in the forward pass. Trained on 4k HumanML3D motions ->
+  all three generators are out-of-distribution.
+- **2-bone IK:** `models/v18_ik.py::apply_ik` — unchanged.
 
-**Key result (n=50 each):** MoMask FSR 14.1%→12.7% / Jitter 0.0128→0.0107; MDM 11.9%→11.2% / 0.0142→0.0115; T2M-GPT 12.0%→11.0% / 0.0139→0.0107. BoneCV unchanged, ContactAcc 100% on all. Full derivation in `docs/v18_devlog.md`; results figure `analysis/v18_ik_scale/results.png`.
+**Key results (leak-free splits).** Smoothing's FSR cost vs pure de-skate:
+V18 +4.14..+4.67pp | Gaussian +2.02..+3.06pp | **V19 +0.64..+1.28pp**.
+Delivery point `v19_045`: T2M-GPT FSR 11.99%->7.34% (V18: 10.99%), FootErr 0.0292
+(V18: 0.0399). BoneCV/ContactAcc unchanged.
 
-**Honest finding:** with the IK constraint, FSR↔Jitter is an irreducible trade-off — the learned smoother traces the *same* frontier as a tuned Gaussian (beats Original on both axes, does not Pareto-dominate the analytical filter).
+**Honest finding (strengthened, not overturned).** Across 24 comparable operating
+points the learned smoother beats a tuned Gaussian at only 3 (one per generator,
+all at the least-smoothing end, by 0.28-0.40pp) and loses the rest by up to 0.90pp.
+The V18-era "same frontier" conclusion survives after fixing leakage, proxy/metric
+mismatch, IK train/eval mismatch, corpus corruption, LR, and checkpoint selection.
+**Caveat:** V19's delivery point has Jitter ABOVE the original (0.01733 vs 0.01388);
+V18's point had both metrics below. See `docs/v19_results.md` §4.
+
+**Semantic preservation (answered 2026-07-20).** `testing/v19_semantic.py` runs the
+HumanML3D `text_mot_match` evaluator (FID / R-precision / MM-Dist / Diversity) with a
+paired bootstrap. Correcting the feet does NOT measurably break text alignment: only
+3 of 12 method x generator cells show a significant MM-Dist change, all small.
+`deskate_ik` is the WORST offender — so the smoothing stage also repairs semantic drift,
+not just visual twitching. Caveats: n=50, GT reference only n=26 (local HumanML3D
+checkout is 8177/14616), R-precision differences are pure noise. See `docs/v19_results.md` §3.5.
+
+**Jitter RMS hides the thing that matters.** Twitching is a SPIKE phenomenon. Ankle
+acceleration p99/max relative to the original: v19_045 1.54x/1.79x (twitchy),
+v19_088a10 0.91x/0.94x (smoother than original), deskate_ik 3.02x/3.64x (disastrous).
+Always report p99/max alongside RMS — `analysis/v19_jitter_trace.py`.
+
+**Delivery point: `checkpoints/v19_088a10`** (NOT v19_045, which was withdrawn).
+It beats the original on FSR, Jitter RMS, jitter spikes, and semantics on all three
+generators. Still slightly behind a tuned Gaussian, consistent with the main finding.
+
+**Biggest remaining gaps:** visual confirmation (videos in `outputs/videos/v19/` still
+render the OLD v19_045 point); sample size; the four degenerate metrics
+(Floating/ContactAcc/Penetration/BoneCV never move); the V8 number conflict below.
 
 - **Author:** Xin Wan (nxkh91), Durham University
 - **Server:** gpu3, NVIDIA TITAN Xp 12GB
@@ -46,13 +79,23 @@ motionfix/
 └── logs/            # Log files (git-ignored)
 ```
 
-### V18 + IK — current method (run from repo root)
+### V19 — current method (run from repo root)
 ```bash
-python training/v18_ik.py            # Train adaptive smoother → checkpoints/v18_ik/best.pth (~40s)
-python testing/v18_ik.py             # 5-way ablation on MoMask held-out → analysis/v18_ik_viz/
-python testing/v18ik_scale.py        # Cross-generator eval (MoMask/MDM/T2M-GPT, n=50) → analysis/v18_ik_scale/
-python analysis/make_results_chart.py# 4-panel results figure → analysis/v18_ik_scale/results.png
-python utils/render_v18ik.py [names] # Side-by-side Original vs Learned+IK videos → outputs/videos/v18_ik/
+python data/prep/v19.py --n 4000        # build data/training/v19_cache.pt from RAW HumanML3D
+python training/v19.py --epochs 120 --jit-share 0.45 --tag 045    # train one operating point
+python testing/v19_eval.py --v19 checkpoints/v19_045/best.pth --tag v19_045   # 7 metrics, leak-free
+python analysis/v19_frontier.py         # learned vs Gaussian frontier -> analysis/v19/frontier.png
+python testing/v19_semantic.py --v19 checkpoints/v19_088a10/best.pth   # FID/R-prec/MM-Dist
+python analysis/v19_jitter_trace.py     # spike character (p99/max) -> analysis/v19/jitter_trace.png
+python utils/render_v19.py [ids]        # 4-panel comparison videos -> outputs/videos/v19/
+```
+`--jit-share` selects the operating point on the FSR-Jitter frontier (sweep it, do not
+tune it once); `--anch-share` (default 0.20) must be lowered to reach the low-jitter end.
+
+### V18 + IK — superseded (kept for comparison)
+```bash
+python training/v18_ik.py            # NOTE: trains with IK outside the loop (defect A1)
+python testing/v18ik_scale.py        # NOTE: leaks 40/50 MoMask training motions (defect B1)
 ```
 
 ### Legacy training / testing (V8 baseline)
@@ -132,11 +175,25 @@ This is the mechanism that makes V8 work — it only modifies foot joints at ska
 
 | Version | Location | Status | Key Trait |
 |---------|----------|--------|-----------|
-| **V18 + IK** | `models/v18.py`, `models/v18_ik.py`, `training/v18_ik.py`, `testing/v18ik_scale.py` | **CURRENT / final** | De-skate → learned smoother → 2-bone IK; FSR↓ Jitter↓ bones rigid, cross-generator |
-| V18 | `models/v18.py`, `training/v18.py` | Superseded | Velocity-space contact mask (broke FSR-Jitter antagonism) but `cumsum` drift (FootErr 0.39m) |
-| V14–V17 | `models/v14..v17.py` | Diagnostic | Physics baselines + learned smoothers; established the FSR↔Jitter frontier |
-| V8 | `models/v8.py`, `testing/v8.py` | Stable baseline | Selective foot replacement, ~2.9% FSR reduction |
-| V9–V13 | `models/v9..v13.py` | Stored | Soft gating+IK / dual-head / amplified-noise experiments |
+| **V19** | `models/v19.py`, `training/v19.py`, `data/prep/v19.py`, `testing/v19_eval.py` | **CURRENT** | IK-in-the-loop + contact-partitioned, threshold-aligned loss; trained on 4k HumanML3D (no leakage possible). Cuts the smoother's FSR cost from +4.5pp to +0.9pp vs V18 |
+| V18 + IK | `models/v18.py`, `models/v18_ik.py`, `training/v18_ik.py` | Superseded | Same pipeline shape; its TRAINING had 6 defects (see docs/v19_devlog.md) |
+| V18 | `models/v18.py::refine`/`v18_fix` | Dead code | Velocity-space cumsum path — abandoned (FootErr 0.39m drift). Lives in the same file as the current position-space path; do not confuse them |
+| V14-V17 | `models/v14..v17.py` | Diagnostic | Physics baselines + learned smoothers; established the FSR-Jitter frontier |
+| V8 | `models/v8.py` | Stable baseline | Selective foot replacement |
+| V9-V13 | `models/v9..v13.py` | Stored | Soft gating+IK / dual-head / amplified-noise experiments |
+
+**⚠️ V14/V15 results are CONFOUNDED.** Both trained on `data/training/v14/`, which
+`data/prep/v14.py` corrupted by de-normalising already-raw HumanML3D features
+(`motion_263 * std + mean`). Feet are compressed into a 9cm vertical band, so the
+contact heuristic marks ~96% of frames as contact. Their identity-collapse has a
+separate explanation (L1 signal washout), but the data was ALSO broken — do not
+cite them as clean evidence that learning cannot work here. Use `data/prep/v19.py`.
+
+**⚠️ "val loss went down" != "the model learned."** V19's first sweep showed
+monotonically falling val loss across 6 operating points while the residual was
+identically ~1e-8 — the drop was entirely from changing the loss weights. LR 2e-3
+collapses this model back to residual=0; use 2e-4. Always plot a weight-independent
+quantity (|residual|) alongside any loss curve.
 
 ## Key Lessons Learned
 
