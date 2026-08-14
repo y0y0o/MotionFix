@@ -8,7 +8,7 @@
 #SBATCH --output=/home3/nxkh91/projects/motionfix/logs/momask_test.log
 source /etc/profile
 source ~/miniconda3/bin/activate t2mgpt
-module purge; module load cuda/11.0-cudnn8.0.5 2>/dev/null
+# no cuda module: t2mgpt torch bundles cu121
 export MPLBACKEND=Agg
 cd /home3/nxkh91/projects/momask-codes
 echo "START $(date) on $(hostname)  torch=$(python -c 'import torch;print(torch.__version__)')"
