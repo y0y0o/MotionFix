@@ -26,9 +26,26 @@ HumanML3D 测试集另选 150 个 prompt 重新生成,链路与原 50 条完全�
      持续打滑,与原始不同质,**不可用**。仍有未查明的生成配方差异(guidance / 接触后处理 / MDM 变体)。
   4. `model000600000 + --use_ema` 段错误硬崩溃(无输出);gpu3 节点加载 t2m 数据集时频繁段错误/挂起。
   **结论:MDM 在本环境无法复现原始质量,保持原始 50 条。**(细节见项目记忆 `mdm-generation-gotchas`。)
-- **MoMask 保持 50**(本地无 MoMask 仓库,无法再生成)。
+- **MoMask 扩充成功(50 → 200)。** 本地原本无 MoMask 仓库,现从官方 clone `momask-codes` +
+  下载预训练权重(RVQ-VAE + mask/residual transformer)重新生成 150 条。踩了几个坑并修好:
+  缺 einops、`np.float` 已废弃(修 14 处)、cuDNN 冲突(去掉 cuda 模块,用 torch 自带 cu121)、
+  matplotlib 画图不兼容(去掉画图直接存关节)。**关键:生成的 150 条 FSR 与原始 50 条同分布**
+  (footY 最高 1.47 < 原始 1.56,0 飞脚/NaN),不同于 MDM 的崩坏。pooled 评估 n=200。
 
-**净结果:只有 T2M-GPT 成功扩充(50→200);MDM、MoMask 维持 50。**
+**净结果:T2M-GPT(50→200)与 MoMask(50→200)均成功扩充;仅 MDM 无法复现原始质量,维持 50。**
+
+**MoMask 主表(pooled n=200,`momask_pool_results.json`):**
+
+```
+                FSR(n=10旧)  FSR(n=200) | Jit(n=10)  Jit(n=200)
+original         16.29%       7.86%     |  0.01403    0.00843
+deskate_ik        8.18%       4.73%     |  0.02948    0.01896
+gauss_ik         11.12%       6.33%     |  0.01311    0.00809
+learn_ik         12.85%       7.18%     |  0.01143    0.00713
+v19_ik           11.63%       6.57%     |  0.01343    0.00832
+```
+平滑相对 deskate(n=200):gauss +1.60 / learn +2.45 / **v19 +1.85**。三条核心结论同样保住
+(物理去滑主导、平滑对 FSR 做负功、v19 ≈ 高斯)。绝对 FSR 偏低同样因新 prompt 更广更平。
 
 **当前评估样本:MoMask 50 / MDM 50 / T2M-GPT 200。** 扩充结果见 `v19_088a10_expanded_results.json`。
 
