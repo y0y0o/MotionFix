@@ -174,7 +174,10 @@ v19_ik        2.636   2.533   2.959
 
 1. **视觉确认**(只有你能做):`outputs/videos/v19/*.mp4` 现在渲染的是**旧交付点 v19_045**,不是 088a10。要看当前点得把 `utils/render_v19.py` 的 checkpoint 改成 `v19_088a10` 重渲。
 2. **尖峰统计需对 088a10 重跑**:磁盘上 `jitter_stats.json` 记录的是 v19_045(v19_ik p99=0.101,约 1.54× 原始);CLAUDE.md 记 088a10 为 0.91×/0.94×,但该 json **未被覆盖**。要引用 088a10 的尖峰数,得重跑 `analysis/v19_jitter_trace.py`。
-3. **感知实验**:没做。"Jitter 低 = 看起来更自然"是整条权衡叙事底下未验证的假设。
+3. **感知实验**:工具已搭好,等收人类数据。`outputs/perceptual/rating.html`(本地打分网页)+
+   48 段无标签视频(12 动作 × orig/deskate/gauss/v19)+ `analysis/perceptual_analysis.py`(偏好率+二项检验)。
+   浏览器打开网页 → 找 ≈10 人逐对选"更自然" → CSV 收进 `responses/` → 跑分析。
+   这将验证"Jitter 低 = 看起来更自然"这个整条权衡叙事底下未验证的假设,并补上导师第7点的 physical plausibility 人证。
 4. **四个恒定指标**:Floating/ContactAcc/Pen/BoneCV 在所有路里都不变(构造保证),7 指标实际只有 3 个在动——应写成"invariant by construction",别当成绩。
 5. **样本量**:语义 n=50、FID 参考集 n=26(本地 HumanML3D 只有 8177/14616 条)。
 6. **V8 基线数字冲突**:`CLAUDE.md` 说降 2.9%,`research_log` 说 14.1%→15.6%(变差)。写进正文前需确认。
