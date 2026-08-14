@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>MotionFix 感知实验 — 哪个更自然</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1a1a1a; --mut:#6b6b6b; --acc:#2a78d6; --line:#e3e3e0; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background:var(--bg); color:var(--ink); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 22px 18px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--mut); font-size: 13px; margin-bottom: 18px; line-height:1.5; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  .row { display:flex; gap:16px; }
+  .vid { flex:1; text-align:center; }
+  video { width:100%; max-width:420px; background:#fff; border:1px solid var(--line); border-radius:10px; }
+  .vlabel { font-size:26px; font-weight:700; color:var(--mut); margin-bottom:6px; }
+  .btns { display:flex; gap:12px; justify-content:center; margin-top:18px; flex-wrap:wrap; }
+  button { font-size:15px; padding:11px 20px; border-radius:10px; border:1px solid var(--line);
+           background:#fff; color:var(--ink); cursor:pointer; }
+  button.primary { border-color:var(--acc); color:var(--acc); font-weight:600; }
+  button:hover { background:#f0f6ff; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .bar { height:8px; background:#e9e9e6; border-radius:5px; overflow:hidden; margin:14px 0 4px; }
+  .bar > i { display:block; height:100%; background:var(--acc); width:0; transition:width .2s; }
+  .meta { font-size:12px; color:var(--mut); display:flex; justify-content:space-between; }
+  .hide { display:none; }
+  input { font-size:15px; padding:9px 12px; border:1px solid var(--line); border-radius:8px; width:220px; }
+  .kbd { font-size:12px; color:var(--mut); margin-top:10px; text-align:center; }
+  .center { text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MotionFix 感知实验</h1>
+  <div class="sub">你会看到成对的人体动作动画。请只凭「<b>看起来哪个更自然、更像真人</b>」来选择。
+    没有对错,凭直觉即可。两段视频会循环播放,可点「重播」。</div>
+
+  <!-- 开始页 -->
+  <div id="start" class="card center">
+    <p>请输入你的代号(拼音或编号皆可),然后开始。</p>
+    <input id="rater" placeholder="例如 zhang3 / p01" autocomplete="off">
+    <div style="margin-top:16px">
+      <button class="primary" onclick="begin()">开始</button>
+    </div>
+    <div class="kbd">共 <span id="ntotal"></span> 对,约 8–12 分钟。</div>
+  </div>
+
+  <!-- 打分页 -->
+  <div id="trial" class="card hide">
+    <div class="bar"><i id="prog"></i></div>
+    <div class="meta"><span id="counter"></span><span id="rid"></span></div>
+    <div class="row" style="margin-top:12px">
+      <div class="vid">
+        <div class="vlabel">A</div>
+        <video id="vA" autoplay loop muted playsinline></video>
+      </div>
+      <div class="vid">
+        <div class="vlabel">B</div>
+        <video id="vB" autoplay loop muted playsinline></video>
+      </div>
+    </div>
+    <div class="btns">
+      <button onclick="choose('A')">← A 更自然</button>
+      <button onclick="choose('tie')">分不清 / 差不多</button>
+      <button onclick="choose('B')">B 更自然 →</button>
+    </div>
+    <div class="btns" style="margin-top:4px">
+      <button onclick="replay()">↻ 重播两段</button>
+    </div>
+    <div class="kbd">键盘:← 选 A,→ 选 B,空格 = 分不清,R = 重播</div>
+  </div>
+
+  <!-- 结束页 -->
+  <div id="done" class="card center hide">
+    <h1>完成,谢谢!</h1>
+    <p class="sub">请点下面按钮把结果保存为文件,发回给我。</p>
+    <button class="primary" onclick="exportCSV()">导出结果 CSV</button>
+    <button onclick="exportJSON()">导出 JSON</button>
+    <div class="kbd" id="savedhint"></div>
+  </div>
+</div>
+
+<script>
+// ===== 实验配置 =====
+const MOTIONS = ["003111","011997","002951","009161","005697","001448",
+                 "003784","005485","003566","006512","000076","000119"];
+// 三类对比:每类都拿 v19(交付点)和另一个比
+const COMPARISONS = [["orig","v19"], ["deskate","v19"], ["gauss","v19"]];
+const CLIP = (mid,cond) => `clips/${mid}_${cond}.mp4`;
+
+// 生成全部对(motion × comparison),打乱顺序,并随机左右
+function buildTrials() {
+  let t = [];
+  for (const mid of MOTIONS)
+    for (const [c1,c2] of COMPARISONS)
+      t.push({mid, c1, c2});
+  shuffle(t);
+  // 每对随机决定谁在 A(左)谁在 B(右)
+  for (const x of t) {
+    if (Math.random() < 0.5) { x.A = x.c1; x.B = x.c2; }
+    else { x.A = x.c2; x.B = x.c1; }
+  }
+  return t;
+}
+function shuffle(a){ for(let i=a.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[a[i],a[j]]=[a[j],a[i]];}}
+
+let trials=[], idx=0, rater="", results=[], tStart=0;
+document.getElementById('ntotal').textContent = MOTIONS.length*COMPARISONS.length;
+
+function begin(){
+  rater = (document.getElementById('rater').value || 'anon').trim();
+  trials = buildTrials();
+  results = []; idx = 0;
+  document.getElementById('start').classList.add('hide');
+  document.getElementById('trial').classList.remove('hide');
+  document.getElementById('rid').textContent = '代号 ' + rater;
+  showTrial();
+}
+
+function showTrial(){
+  const t = trials[idx];
+  const vA=document.getElementById('vA'), vB=document.getElementById('vB');
+  vA.src = CLIP(t.mid, t.A); vB.src = CLIP(t.mid, t.B);
+  vA.load(); vB.load();
+  document.getElementById('counter').textContent = `第 ${idx+1} / ${trials.length} 对`;
+  document.getElementById('prog').style.width = (100*idx/trials.length) + '%';
+  tStart = performance.now();
+}
+
+function choose(side){
+  const t = trials[idx];
+  let chosen;
+  if (side==='A') chosen = t.A;
+  else if (side==='B') chosen = t.B;
+  else chosen = 'tie';
+  results.push({
+    rater, idx: idx+1, motion: t.mid,
+    comparison: [t.c1,t.c2].join('_vs_'),
+    left_cond: t.A, right_cond: t.B,
+    choice_side: side, chosen_cond: chosen,
+    rt_ms: Math.round(performance.now()-tStart),
+    ts: new Date().toISOString()
+  });
+  idx++;
+  if (idx >= trials.length) finish(); else showTrial();
+}
+
+function replay(){
+  for (const id of ['vA','vB']){ const v=document.getElementById(id); v.currentTime=0; v.play(); }
+}
+
+function finish(){
+  document.getElementById('trial').classList.add('hide');
+  document.getElementById('done').classList.remove('hide');
+  document.getElementById('prog').style.width='100%';
+}
+
+document.addEventListener('keydown', e=>{
+  if (document.getElementById('trial').classList.contains('hide')) return;
+  if (e.key==='ArrowLeft') choose('A');
+  else if (e.key==='ArrowRight') choose('B');
+  else if (e.key===' ') { e.preventDefault(); choose('tie'); }
+  else if (e.key==='r'||e.key==='R') replay();
+});
+
+function download(name, text){
+  const b=new Blob([text],{type:'text/plain;charset=utf-8'});
+  const u=URL.createObjectURL(b); const a=document.createElement('a');
+  a.href=u; a.download=name; a.click(); URL.revokeObjectURL(u);
+  document.getElementById('savedhint').textContent='已保存 '+name;
+}
+function exportCSV(){
+  const cols=['rater','idx','motion','comparison','left_cond','right_cond','choice_side','chosen_cond','rt_ms','ts'];
+  const lines=[cols.join(',')];
+  for (const r of results) lines.push(cols.map(c=>r[c]).join(','));
+  download(`perceptual_${rater}.csv`, lines.join('\n'));
+}
+function exportJSON(){ download(`perceptual_${rater}.json`, JSON.stringify(results,null,2)); }
+</script>
+</body>
+</html>
