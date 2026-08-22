@@ -37,8 +37,16 @@ HumanML3D `text_mot_match` evaluator (FID / R-precision / MM-Dist / Diversity) w
 paired bootstrap. Correcting the feet does NOT measurably break text alignment: only
 3 of 12 method x generator cells show a significant MM-Dist change, all small.
 `deskate_ik` is the WORST offender — so the smoothing stage also repairs semantic drift,
-not just visual twitching. Caveats: n=50, GT reference only n=26 (local HumanML3D
-checkout is 8177/14616), R-precision differences are pure noise. See `docs/v19_results.md` §3.5.
+not just visual twitching. See `docs/v19_results.md` §3.5.
+**FID reference fixed (2026-08-22).** The old FID used an n=26 GT reference (only 26 of
+the 50 eval prompts had a local GT) — rank-deficient in the 512-d embedding, so FID was
+noise. `testing/v19_fid_ref.py` rebuilds it from the standard `test.txt` split (all 1215
+local-GT motions, full-rank) with generated n=200 (t2mgpt/momask) / 50 (mdm) →
+`analysis/v19/semantic_largeref.json`. Result is cleaner and matches the physics story:
+`deskate_ik` hurts FID most (momask 0.96→1.61, t2mgpt 0.48→0.66), the smoother repairs it
+(gauss≈learn≈v19≈original), and MDM's FID is ~16 (an order of magnitude worse — its local
+samples are genuinely off-distribution, consistent with the MDM reproduction failure).
+R-precision differences remain pure noise.
 
 **Jitter RMS hides the thing that matters.** Twitching is a SPIKE phenomenon. Ankle
 acceleration p99/max relative to the original: v19_045 1.54x/1.79x (twitchy),
