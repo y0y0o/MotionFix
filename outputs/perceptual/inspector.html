@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>MotionFix 感知素材 — 带标签检查页(仅自己看)</title>
+<style>
+  :root { --bg:#f6f6f4; --card:#fff; --ink:#1a1a1a; --mut:#6b6b6b; --line:#e3e3e0;
+          --orig:#8a8a8a; --deskate:#c2582b; --gauss:#2f8f4e; --v19:#2a78d6; --warn:#b8860b; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
+         background:var(--bg); color:var(--ink); }
+  .wrap { max-width:1200px; margin:0 auto; padding:22px 18px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--mut); font-size:13px; line-height:1.6; margin-bottom:10px; }
+  .banner { background:#fff7e6; border:1px solid #f0d999; color:#8a5a00;
+            border-radius:10px; padding:10px 14px; font-size:13px; margin-bottom:20px; }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--mut); margin-bottom:18px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:11px; height:11px; border-radius:3px; display:inline-block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:18px; }
+  .head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .mid { font-weight:700; font-size:15px; font-variant-numeric:tabular-nums; }
+  .prompt { color:var(--mut); font-size:13px; }
+  .ctrl { background:#fff2cc; color:var(--warn); border:1px solid #f0d999;
+          font-size:11px; padding:2px 8px; border-radius:20px; }
+  .row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .vid { text-align:center; }
+  .vlabel { font-size:13px; font-weight:600; margin-bottom:6px; }
+  .badge { display:inline-block; color:#fff; font-size:11px; padding:2px 8px;
+           border-radius:5px; margin-left:4px; vertical-align:middle; }
+  .cap { font-size:11px; color:var(--mut); margin-top:5px; line-height:1.4; }
+  video { width:100%; background:#fff; border:1px solid var(--line); border-radius:8px; }
+  video.orig    { outline:2px solid var(--orig); }
+  video.deskate { outline:2px solid var(--deskate); }
+  video.gauss   { outline:2px solid var(--gauss); }
+  video.v19     { outline:2px solid var(--v19); }
+  @media (max-width:820px){ .row{ grid-template-columns:repeat(2,1fr);} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MotionFix 感知素材 — 带标签检查页</h1>
+  <div class="sub">用于自查每段视频的来源与条件。这里的四个条件都渲染自 <b>T2M-GPT</b> 的原始关节输出,
+    同一动作四条件共享相机与坐标范围,故可逐段对照。</div>
+  <div class="banner">⚠️ 这是<b>带标签</b>的检查页,只给你自己看。<b>正式打分请用 <code>rating.html</code></b>(那个是盲测,不显示条件名)——别把这一页发给参与者。</div>
+
+  <div class="legend">
+    <span><i class="dot" style="background:var(--orig)"></i>orig = 原始生成器输出(未修)</span>
+    <span><i class="dot" style="background:var(--deskate)"></i>deskate = 去滑 + IK(纯物理)</span>
+    <span><i class="dot" style="background:var(--gauss)"></i>gauss = 去滑 + 高斯 + IK</span>
+    <span><i class="dot" style="background:var(--v19)"></i>v19 = 去滑 + V19(088a10) + IK(交付点)</span>
+    <span class="ctrl">对照 = FSR≈0,四条件几乎一致(注意力检查)</span>
+  </div>
+
+  <div id="grid"></div>
+</div>
+
+<script>
+// 12 个动作 + 文本 prompt(取 HumanML3D 首条标注)。000076/000119 是 FSR=0 对照。
+const MOTIONS = [
+  ["003111", "the person is doing a dance move.", false],
+  ["011997", "a person walks up some stairs, turns around, and walks back down them.", false],
+  ["002951", "a man takes several steps backwards.", false],
+  ["009161", "a person walks forward from one end to the other.", false],
+  ["005697", "moving forward and backward finally come on the same place.", false],
+  ["001448", "the figure steps forward then turns slightly right and proceeds to walk in that direction.", false],
+  ["003784", "a man walks in clockwise direction.", false],
+  ["005485", "a man is walking forward", false],
+  ["003566", "person quickly walks in a clockwise position with shoulders facing back happy", false],
+  ["006512", "a person jumps up and down on both feet while circling both arms forward in time with the jumps.", false],
+  ["000076", "man reaches down to the left to pick up item, then to the right, then replaces it.", true],
+  ["000119", "a person drive a car", true],
+];
+const CONDS = [
+  ["orig",    "orig",    "原始生成"],
+  ["deskate", "deskate", "去滑(纯物理)"],
+  ["gauss",   "gauss",   "去滑+高斯"],
+  ["v19",     "v19",     "V19 交付点"],
+];
+const CVAR = { orig:"--orig", deskate:"--deskate", gauss:"--gauss", v19:"--v19" };
+
+const grid = document.getElementById('grid');
+for (const [mid, prompt, isCtrl] of MOTIONS) {
+  const card = document.createElement('div'); card.className = 'card';
+  const head = document.createElement('div'); head.className = 'head';
+  head.innerHTML = `<span class="mid">${mid}</span>` +
+    (isCtrl ? `<span class="ctrl">对照 · FSR≈0</span>` : ``) +
+    `<span class="prompt">${prompt}</span>`;
+  card.appendChild(head);
+  const row = document.createElement('div'); row.className = 'row';
+  for (const [cond, cls, zh] of CONDS) {
+    const cell = document.createElement('div'); cell.className = 'vid';
+    const color = `var(${CVAR[cond]})`;
+    cell.innerHTML =
+      `<div class="vlabel">${cond}<span class="badge" style="background:${color}">${zh}</span></div>` +
+      `<video class="${cls}" src="clips/${mid}_${cond}.mp4" autoplay loop muted playsinline></video>` +
+      `<div class="cap">${mid}_${cond}.mp4</div>`;
+    row.appendChild(cell);
+  }
+  card.appendChild(row);
+  grid.appendChild(card);
+}
+</script>
+</body>
+</html>
