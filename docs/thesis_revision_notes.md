@@ -151,6 +151,32 @@
 | 088a10 分类别 | `analysis/v19/by_category_088a10.json` | `analysis/v19_by_category.py` |
 | de-skate FSR 分解 | `analysis/v19/deskate_decomp.json` | `analysis/v19_deskate_decomp.py` |
 | jitter_trace checkpoint 修正 | (v045 备份 `jitter_stats_v045.json.bak`) | `analysis/v19_jitter_trace.py` |
+| **跨生成器固定参数迁移(#12)** | `analysis/v19/transfer.json` | `analysis/v19_transfer.py` |
+| **物理指标 paired bootstrap CI(#15)** | `analysis/v19/bootstrap_ci.json` | `analysis/v19_bootstrap_ci.py` |
+
+### #12 迁移实验 —— 负面(须删 §6.1 drop-in 原句)
+源 T2M-GPT 调 σ*=1.077 冻结→用到 MoMask/MDM。Gaussian 确实需逐生成器调 σ
+(oracle σ 1.08→1.39→1.41,固定 σ* 让 MoMask/MDM jitter 高 14/16%),**但零调参的
+learned FSR 在三个生成器上全面高于冻结 Gaussian(+0.55/+0.74/+0.93pp)**,免调参买不到好处。
+→ §6.1 "learned is a drop-in ... where a classical smoother would require per-generator
+tuning" **被证伪,删或改为诚实版**(把迁移作为"堵死学习组件最后退路"的诚实对照写)。
+
+### #15 paired bootstrap CI(B=10000) —— 直接化解 #1,并给核心主张背书
+**V19 vs Gaussian**(差=V19−Gauss,正=Gauss 更优):
+
+| gen | FSR 差 pp (p) | Jitter 差 ×1e3 (p) |
+|---|---|---|
+| T2M-GPT | +0.16 (p=.115 ns) | +0.49 (p=.000 SIG) |
+| MoMask | +0.24 (p=.002 SIG) | +0.23 (p=.006 SIG) |
+| MDM | +0.18 (p=.275 ns) | −0.00 (p=.999 ns) |
+
+→ "Gaussian Pareto 支配"严格只在 **MoMask** 成立(且微小);T2M-GPT FSR 打平、MDM 全平局。
+**核心主张全部显著**:deskate−original(FSR −2.45/−3.14/−4.82pp,p=.000)、gauss−deskate(+)、
+v19−original FSR(−,全显著)。
+**新警告**:v19 在 **jitter** 上胜原始**只在 T2M-GPT 显著**(−0.89e3,p=0);MoMask(p=.428)/
+MDM(p=.092)在噪声内。§5.1 "beats original on both metrics" 须弱化。
+
+**建议**:Table 1/2 每格加 [95% CI],关键对比给 p 值(数据在 `bootstrap_ci.json`)。
 
 **尖峰实测**(v19/orig p99·max):T2M-GPT 0.93·0.98 / MoMask **1.03·1.07** / MDM 0.90·0.83。
 → 论文 §5.E "0.91×/0.94× on all three generators" 错,MoMask 尖峰略升,**必须按生成器分开写**。
@@ -182,9 +208,32 @@
 > therefore does not rely on the generator's predicted contact channel, which keeps it
 > applicable to any generator whose output can be mapped to joint positions.
 
-**【R4 §5.1 化解 Gaussian 支配(配 P1 选项1)】** 在 §5.1 结论处加:
-> At this delivery point the tuned Gaussian is in fact marginally better than the
-> learned smoother on both metrics (Tables 1–2); this is consistent with, and a sharper
-> statement of, the central finding that the learned component does not beat a
-> well-tuned classical baseline. Its advantage, examined in Section [transfer], is
-> lower per-generator tuning rather than lower error.
+**【R4 §5.1 化解 Gaussian 支配(配 P1,已被 CI 强化)】** 在 §5.1 结论处加:
+> A paired bootstrap (B = 10,000) shows that the difference between the learned
+> smoother and the tuned Gaussian is statistically significant on both metrics only for
+> MoMask (FSR +0.24 pp, p = 0.002; jitter +0.23×10⁻³, p = 0.006), where the Gaussian is
+> marginally better; on T2M-GPT the FSR difference is within noise (p = 0.115) and on
+> MDM neither metric differs significantly. The two smoothers are therefore
+> statistically indistinguishable except on one generator, which is a precise statement
+> of the central finding: the learned component does not beat a well-tuned classical
+> baseline, and its value lies in the pipeline and evaluation protocol rather than in
+> out-performing the baseline.
+
+**【R5 §5.1 交付点 vs 原始(配 #15 新警告)】** 把"beats the original on both metrics"改为:
+> Relative to the original output, the delivery point significantly reduces FSR on all
+> three generators (paired bootstrap, all p < 0.001). The RMS-jitter reduction over the
+> original is significant on T2M-GPT (−0.89×10⁻³, p < 0.001) but within noise on MoMask
+> (p = 0.43) and MDM (p = 0.09); on those two the delivery point holds jitter at the
+> original level while reducing FSR, rather than improving both.
+
+**【R6 §6.1 删 drop-in 主张(配 #12)】** 删掉"the learned component is a drop-in ...
+require per-generator tuning",换成:
+> We further tested whether the learned smoother's fixed-parameter nature is itself an
+> advantage. A Gaussian tuned on T2M-GPT (σ = 1.08) and frozen under-smooths MoMask and
+> MDM (jitter 14–16 % above their original level), so a Gaussian does need per-generator
+> σ retuning to hit a fixed jitter target. This confers no benefit on the learned model,
+> however: the frozen, untuned Gaussian still attains lower FSR than the learned smoother
+> on all three generators (by 0.55–0.93 pp). The learned component does not win even on
+> the cross-generator transfer axis — closing the last avenue by which it might have
+> justified its complexity, and reinforcing that the contribution is the pipeline and
+> protocol.
