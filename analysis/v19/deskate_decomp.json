@@ -1,0 +1,9 @@
+{
+  "n": 200,
+  "src": "data/test_inputs/t2mgpt/t2mgpt_raw_joints",
+  "clamp_eps_m": 0.001,
+  "FSR_original": 0.0643020316179668,
+  "FSR_deskate_preIK": 0.0195586811449199,
+  "FSR_deskate_postIK": 0.03982765145333068,
+  "clamp_rate_contact_frames": 0.11957977134617365
+}
