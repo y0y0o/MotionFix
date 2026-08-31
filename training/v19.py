@@ -70,13 +70,25 @@ def log(msg, p=True):
 # Forward: smoother -> differentiable IK -> rigid toe
 # ═══════════════════════════════════════════════════════════════════════
 
-def forward_pipeline(model, b):
+def forward_pipeline(model, b, use_ik=True):
     """
     Returns the POST-IK ankle XZ and the rigidly derived toe XZ — i.e. exactly
     the quantities utils.metrics will later measure.
+
+    use_ik=False is the ABLATION for the IK-in-the-loop contribution: the loss is
+    computed on the PRE-IK smoother output instead of the post-IK trajectory
+    (inference still applies IK either way). This isolates the effect of training
+    with the IK clamp inside the forward pass.
     """
     res = model(b['des4'], b['orig4'], b['w4'])
     ank_xz = b['des4'] + res                                  # (B,T,4) pre-IK
+
+    if not use_ik:
+        toe = []
+        for li in range(2):
+            toe.append(ank_xz[..., 2 * li]     + b['toeoff'][:, :, li, 0])
+            toe.append(ank_xz[..., 2 * li + 1] + b['toeoff'][:, :, li, 2])
+        return ank_xz, torch.stack(toe, -1)
 
     ank_ik, toe_xz = [], []
     for li in range(2):
@@ -99,12 +111,12 @@ def foot_err(ank_ik, b):
     return float((per_leg * m).sum() / m.sum().clamp(min=1.0) / 1.0)
 
 
-def calibrate_lambdas(model, crit, b, targets=GRAD_TARGET):
+def calibrate_lambdas(model, crit, b, targets=GRAD_TARGET, use_ik=True):
     """
     B5 — set each lambda so the term's share of total gradient norm matches
     `targets`. Removes the units problem (acc^2 ~1e-6 vs a soft count ~1e-1).
     """
-    ank_ik, toe_xz = forward_pipeline(model, b)
+    ank_ik, toe_xz = forward_pipeline(model, b, use_ik)
     terms = crit.terms(ank_ik, toe_xz, b['des4'], b['w4'], b['mask'])
 
     norms = {}
@@ -140,7 +152,11 @@ def main():
                     help="gradient share for the anti-drift anchor. Held at 0.20 for the"
                          " main sweep; lower it to reach the low-jitter end of the frontier.")
     ap.add_argument('--tag', default='default')
+    ap.add_argument('--no-ik-in-loop', action='store_true',
+                    help="ABLATION: compute the loss on the pre-IK smoother output "
+                         "(inference still applies IK). Isolates IK-in-the-loop.")
     args = ap.parse_args()
+    use_ik = not args.no_ik_in_loop
 
     # jit_share splits 2:1 between air-weighted and unweighted jitter
     js = args.jit_share
@@ -181,7 +197,7 @@ def main():
     log(f"  V19Smoother: {model.n_params():,} params (V18 was 48,840 over 8 dims)")
 
     # ── B5: calibrate lambdas on one batch ──
-    lam, norms = calibrate_lambdas(model, crit, take(tr_idx[:BATCH]), GRAD_TARGET)
+    lam, norms = calibrate_lambdas(model, crit, take(tr_idx[:BATCH]), GRAD_TARGET, use_ik)
     log("")
     log("  lambda calibration (grad-norm share targets):")
     for k in GRAD_TARGET:
@@ -205,7 +221,7 @@ def main():
         tl, nb = 0.0, 0
         for i in range(0, len(pm), BATCH):
             b = take(pm[i:i + BATCH])
-            ank_ik, toe_xz = forward_pipeline(model, b)
+            ank_ik, toe_xz = forward_pipeline(model, b, use_ik)
             loss, _ = crit(ank_ik, toe_xz, b['des4'], b['w4'], b['mask'])
             opt.zero_grad(); loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -218,7 +234,7 @@ def main():
         model.eval()
         with torch.no_grad():
             vb = take(val_idx)
-            ank_ik, toe_xz = forward_pipeline(model, vb)
+            ank_ik, toe_xz = forward_pipeline(model, vb, use_ik)
             vloss, comps = crit(ank_ik, toe_xz, vb['des4'], vb['w4'], vb['mask'])
             vloss = float(vloss)
             fe = foot_err(ank_ik, vb)
