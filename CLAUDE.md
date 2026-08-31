@@ -49,13 +49,19 @@ samples are genuinely off-distribution, consistent with the MDM reproduction fai
 R-precision differences remain pure noise.
 
 **Jitter RMS hides the thing that matters.** Twitching is a SPIKE phenomenon. Ankle
-acceleration p99/max relative to the original: v19_045 1.54x/1.79x (twitchy),
-v19_088a10 0.91x/0.94x (smoother than original), deskate_ik 3.02x/3.64x (disastrous).
-Always report p99/max alongside RMS — `analysis/v19_jitter_trace.py`.
+acceleration p99/max of v19 relative to the original, **re-run per generator on the
+088a10 delivery point (2026-08-31, `analysis/v19_spikes_3gen.py` →
+`analysis/v19/spike_ratios_088a10.json`)**: T2M-GPT 0.93x/0.98x, MoMask **1.03x/1.07x**,
+MDM 0.90x/0.83x. So the spikes drop on T2M-GPT and MDM but are slightly ABOVE the
+original on MoMask — the earlier "0.91x/0.94x on all three generators" was wrong (it
+came from a stale v19_045 `jitter_stats.json` showing 1.54x/1.79x, the withdrawn point).
+Report p99/max per generator, never as a single "all three" number. Always report
+p99/max alongside RMS — `analysis/v19_jitter_trace.py`.
 
 **Delivery point: `checkpoints/v19_088a10`** (NOT v19_045, which was withdrawn).
-It beats the original on FSR, Jitter RMS, jitter spikes, and semantics on all three
-generators. Still slightly behind a tuned Gaussian, consistent with the main finding.
+It beats the original on FSR, Jitter RMS, and semantics on all three generators, and on
+jitter SPIKES on T2M-GPT/MDM but not MoMask (see above). Still slightly behind a tuned
+Gaussian, consistent with the main finding.
 
 **Biggest remaining gaps:** visual confirmation (videos in `outputs/videos/v19/` still
 render the OLD v19_045 point); sample size; the four degenerate metrics

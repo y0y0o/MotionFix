@@ -239,6 +239,13 @@ finding means.
 - External citations are placeholders pending verification. ⚠ (citation phase)
 - **User approval required before Phase 3 (argument building) / drafting.**
 
-**Pre-drafting blockers (unchanged from chapter plan):** re-run jitter trace for
-088a10; resolve V8-baseline number conflict; re-render 088a10 videos; decide
-Chapter 6.
+**Pre-drafting blockers:**
+- [x] ~~re-run jitter trace for 088a10~~ **DONE 2026-08-31** (`analysis/v19/spike_ratios_088a10.json`):
+  v19/orig p99·max = T2M-GPT 0.93·0.98, MoMask **1.03·1.07**, MDM 0.90·0.83. Paper §5.E
+  "0.91×/0.94× on all three generators" is WRONG — MoMask spikes rise. Rewrite per generator.
+- [x] ~~per-category for 088a10~~ **DONE 2026-08-31** (`analysis/v19/by_category_088a10.json`,
+  identical to old json → 088a10 all along): backward (0.190→0.196) and jumping (0.033→0.037)
+  REGRESS; largest residual is backward (0.196), not rotation (0.175). Paper §5.C "no category
+  regresses" and "rotation largest residual" are both WRONG.
+- [ ] resolve V8-baseline number conflict (CLAUDE.md −2.9% vs research_log 14.1%→15.6%).
+- [ ] re-render 088a10 videos; decide Chapter 6.

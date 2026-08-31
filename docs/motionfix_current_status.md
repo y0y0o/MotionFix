@@ -199,7 +199,13 @@ FID↓  (参考集 n=1215, 满秩)          原始    deskate  gauss   learn   v
 ## 4. 还没做的(缺口)
 
 1. **视觉确认**(只有你能做):`outputs/videos/v19/*.mp4` 现在渲染的是**旧交付点 v19_045**,不是 088a10。要看当前点得把 `utils/render_v19.py` 的 checkpoint 改成 `v19_088a10` 重渲。
-2. **尖峰统计需对 088a10 重跑**:磁盘上 `jitter_stats.json` 记录的是 v19_045(v19_ik p99=0.101,约 1.54× 原始);CLAUDE.md 记 088a10 为 0.91×/0.94×,但该 json **未被覆盖**。要引用 088a10 的尖峰数,得重跑 `analysis/v19_jitter_trace.py`。
+2. ~~**尖峰统计需对 088a10 重跑**~~ **已重跑(2026-08-31)**。`analysis/v19_jitter_trace.py`
+   的 checkpoint 从 v19_045 改到 v19_088a10 并在三个生成器上跑了尖峰比值
+   (`analysis/v19_spikes_3gen.py` → `analysis/v19/spike_ratios_088a10.json`)。
+   **v19/original 的 p99 / max**:T2M-GPT 0.93× / 0.98×;MoMask **1.03× / 1.07×**;
+   MDM 0.90× / 0.83×。**结论**:旧 json(v19_045)的 1.54×/1.79× 是错交付点;
+   CLAUDE.md 与论文写的"0.91×/0.94× on all three generators"**不成立**——只有
+   T2M-GPT/MDM 降尖峰,**MoMask 的尖峰反而略升**。正文必须按生成器分开写,别写"三个都降"。
 3. **感知实验**:工具已搭好,等收人类数据。`outputs/perceptual/rating.html`(本地打分网页)+
    48 段无标签视频(12 动作 × orig/deskate/gauss/v19)+ `analysis/perceptual_analysis.py`(偏好率+二项检验)。
    浏览器打开网页 → 找 ≈10 人逐对选"更自然" → CSV 收进 `responses/` → 跑分析。

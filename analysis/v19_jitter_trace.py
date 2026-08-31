@@ -65,7 +65,7 @@ def traces(m):
 
 def main():
     m19 = V19Smoother().to(DEVICE)
-    m19.load_state_dict(torch.load("checkpoints/v19_045/best.pth",
+    m19.load_state_dict(torch.load("checkpoints/v19_088a10/best.pth",
                                    map_location=DEVICE)['model_state_dict'])
     m19.eval()
 
