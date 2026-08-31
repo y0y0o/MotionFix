@@ -1,18 +1,26 @@
 """
-Thesis Figures 2 & 3 — qualitative ankle-trajectory and velocity plots.
-=======================================================================
-Fig 2: one ankle's X and Z position over time, overlaying original / de-skate /
-       full (V19), with contact windows shaded and reach-clamp frames marked.
-Fig 3: the same ankle's horizontal speed over time, showing de-skate introduces
-       boundary jitter that the smoother repairs.
+Thesis Figures — qualitative ankle-trajectory (Fig T) and speed (Fig S).
+========================================================================
+Addresses figure-review points: serif fonts, semantic labels (Ours (full)),
+reach-clamp as a bottom rug (not full-height lines), light contact shading,
+zoom inset on one contact window, legend off the data, split-y speed panel with
+a labelled threshold, no in-figure title (caption carries the conclusion).
 
-Auto-selects a T2M-GPT clip with a clear contact window, visible original skating,
-and at least one reach-clamp event. Metric defs match utils.metrics.
-Output: analysis/v19/fig2_ankle_trajectory.png, analysis/v19/fig3_ankle_speed.png
+Auto-selects a representative T2M-GPT clip. Metric defs match utils.metrics.
+Output: analysis/v19/fig_trajectory.png, analysis/v19/fig_speed.png
 """
 import os, sys, glob
 import numpy as np
 import torch
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
+plt.rcParams.update({
+    'font.family': 'serif', 'mathtext.fontset': 'stix',
+    'font.size': 9, 'axes.titlesize': 9, 'axes.labelsize': 9,
+    'xtick.labelsize': 8, 'ytick.labelsize': 8, 'legend.fontsize': 8.5,
+})
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.v18 import deskate_xz, FOOT_XZ_DIMS
@@ -23,9 +31,9 @@ from utils.metrics import compute_contact_labels
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 SRC = "data/test_inputs/t2mgpt/t2mgpt_raw_joints"
 ANA = "analysis/v19"
-ANK = 7                      # left ankle
-COL = {'original': '#52514e', 'deskate': '#eb6834', 'v19': '#2a78d6'}
-C_INK, C_MUT, GRID = '#1a1a1a', '#6b6b6b', '#ebeae5'
+ANK = 7
+COL = {'orig': '#52514e', 'deskate': '#eb6834', 'ours': '#2a78d6'}
+CLAMP, SHADE, C_MUT, GRIDC = '#c026d3', '#2a78d6', '#6b6b6b', '#ebeae5'
 
 
 def load(fp):
@@ -37,54 +45,21 @@ def deskate_only(m):
     T = m.shape[0]
     flat = m.reshape(T, -1).astype(np.float32)
     tgt, _ = deskate_xz(m)
-    out = flat.copy()
-    out[:, FOOT_XZ_DIMS] = tgt
+    out = flat.copy(); out[:, FOOT_XZ_DIMS] = tgt
     return out.reshape(T, 22, 3)
 
 
-def contact_windows(labels_col):
-    """List of (start, end) inclusive index ranges where labels==1."""
-    wins, t, T = [], 0, len(labels_col)
+def windows(lab):
+    w, t, T = [], 0, len(lab)
     while t < T:
-        if labels_col[t] > 0.5:
+        if lab[t] > 0.5:
             s = t
-            while t < T and labels_col[t] > 0.5:
+            while t < T and lab[t] > 0.5:
                 t += 1
-            wins.append((s, t - 1))
+            w.append((s, t - 1))
         else:
             t += 1
-    return wins
-
-
-def pick_clip(m19, files):
-    """Choose a clip with a decent contact window, original skating, a clamp event."""
-    best = None
-    for fp in files[:120]:
-        mo = load(fp)
-        dk = deskate_only(mo)
-        v19 = apply_ik(mo, smooth_fix_v19(mo, m19, DEVICE))
-        lab = compute_contact_labels(mo, (7, 8))[:, 0]
-        wins = [w for w in contact_windows(lab) if w[1] - w[0] >= 8]
-        if not wins:
-            continue
-        # reach-clamp frames on left ankle within contact
-        clamp = (np.linalg.norm(dk[:, ANK][:, [0, 2]] - v19[:, ANK][:, [0, 2]], axis=-1) > 1e-3) & (lab > 0.5)
-        # original horizontal speed inside contact (skating amount)
-        sp = np.linalg.norm(np.diff(mo[:, ANK][:, [0, 2]], axis=0), axis=-1)
-        skate = (sp[:-0 or None] > 0.03)
-        score = clamp.sum() + 0.5 * (lab.astype(bool) & np.r_[skate, False]).sum() + 0.01 * sum(w[1]-w[0] for w in wins)
-        if best is None or score > best[0]:
-            best = (score, fp, mo, dk, v19, lab, wins, clamp)
-    return best
-
-
-def shade(ax, wins, clamp):
-    for s, e in wins:
-        ax.axvspan(s, e, color='#2a78d6', alpha=0.06, lw=0)
-    cf = np.where(clamp)[0]
-    for i, f in enumerate(cf):
-        ax.axvline(f, color='#c026d3', alpha=0.22, lw=0.6,
-                   label='reach-clamp frame' if i == 0 else None)
+    return w
 
 
 def style(ax):
@@ -92,67 +67,115 @@ def style(ax):
         ax.spines[s].set_visible(False)
     for s in ('left', 'bottom'):
         ax.spines[s].set_color('#d9d8d3')
-    ax.grid(True, color=GRID, lw=0.8)
+    ax.grid(True, color=GRIDC, lw=0.7)
     ax.set_axisbelow(True)
-    ax.tick_params(colors=C_MUT, labelsize=9)
+    ax.tick_params(colors=C_MUT)
+
+
+def shade(ax, wins):
+    for s, e in wins:
+        ax.axvspan(s, e, color=SHADE, alpha=0.10, lw=0)
+
+
+def rug(ax, cf):
+    ylo, yhi = ax.get_ylim()
+    h = (yhi - ylo) * 0.045
+    ax.vlines(cf, ylo, ylo + h, color=CLAMP, lw=1.0, alpha=0.8)
+    ax.set_ylim(ylo, yhi)
+
+
+def pick(m19, files):
+    best = None
+    for fp in files[:120]:
+        mo = load(fp)
+        dk = deskate_only(mo)
+        v = apply_ik(mo, smooth_fix_v19(mo, m19, DEVICE))
+        lab = compute_contact_labels(mo, (7, 8))[:, 0]
+        wins = [w for w in windows(lab) if w[1] - w[0] >= 8]
+        if len(wins) < 3:
+            continue
+        clamp = (np.linalg.norm(dk[:, ANK][:, [0, 2]] - v[:, ANK][:, [0, 2]], axis=-1) > 1e-3) & (lab > 0.5)
+        sp = np.r_[0, np.linalg.norm(np.diff(mo[:, ANK][:, [0, 2]], axis=0), axis=-1)]
+        score = clamp.sum() + 0.5 * (lab.astype(bool) & (sp > 0.03)).sum()
+        if best is None or score > best[0]:
+            best = (score, fp, mo, dk, v, lab, wins, np.where(clamp)[0])
+    return best
 
 
 def main():
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
     m19 = V19Smoother().to(DEVICE)
     m19.load_state_dict(torch.load("checkpoints/v19_088a10/best.pth",
                                    map_location=DEVICE)['model_state_dict'])
     m19.eval()
     files = sorted(glob.glob(f"{SRC}/*.npy"))
-    _, fp, mo, dk, v19, lab, wins, clamp = pick_clip(m19, files)
+    _, fp, mo, dk, v, lab, wins, cf = pick(m19, files)
     name = os.path.basename(fp).replace('t2mgpt_', '').replace('_joints.npy', '')
-    T = mo.shape[0]
-    fr = np.arange(T)
-    print(f"selected clip {name}  T={T}  contact windows={wins}  clamp frames={int(clamp.sum())}")
+    T = mo.shape[0]; fr = np.arange(T)
+    # zoom window: the middle contact window, padded
+    wz = wins[len(wins) // 2]
+    z0, z1 = max(0, wz[0] - 15), min(T, wz[1] + 16)
+    print(f"clip {name} T={T} windows={len(wins)} clamp={len(cf)} zoom={z0}-{z1}")
 
-    # ── Figure 2: ankle X and Z position over time ──
-    fig, axes = plt.subplots(2, 1, figsize=(9, 5.2), facecolor='#fcfcfb', sharex=True)
-    for ax, coord, ci in [(axes[0], 'X', 0), (axes[1], 'Z', 2)]:
-        ax.set_facecolor('#fcfcfb'); style(ax)
-        shade(ax, wins, clamp)
-        ax.plot(fr, mo[:, ANK, ci], color=COL['original'], lw=1.6, label='original', alpha=0.9)
-        ax.plot(fr, dk[:, ANK, ci], color=COL['deskate'], lw=1.6, label='de-skate', alpha=0.9)
-        ax.plot(fr, v19[:, ANK, ci], color=COL['v19'], lw=1.8, label='full (V19)', alpha=0.95)
-        ax.set_ylabel(f'left-ankle {coord} (m)', fontsize=10, color=C_MUT)
-    axes[1].set_xlabel('frame', fontsize=10, color=C_MUT)
-    h, l = axes[0].get_legend_handles_labels()
-    fig.legend(h, l, frameon=False, fontsize=9.5, labelcolor=C_MUT, ncol=4,
-               loc='upper left', bbox_to_anchor=(0.008, 0.925))
-    fig.suptitle(f'Left-ankle trajectory (clip {name}) — shaded: contact window,  '
-                 'magenta: reach-clamp',
-                 fontsize=10.5, color=C_INK, x=0.008, ha='left', y=0.99)
-    fig.tight_layout(rect=[0, 0, 1, 0.86])
-    fig.savefig(f"{ANA}/fig2_ankle_trajectory.png", dpi=170, facecolor='#fcfcfb')
+    # ── Figure T: trajectory, full-length (left) + zoom (right), X row / Z row ──
+    fig = plt.figure(figsize=(9.2, 4.8), facecolor='white')
+    gs = fig.add_gridspec(2, 2, width_ratios=[2.6, 1], hspace=0.28, wspace=0.22)
+    for r, (coord, ci) in enumerate([('X', 0), ('Z', 2)]):
+        for c, (lo, hi, zoom) in enumerate([(0, T, False), (z0, z1, True)]):
+            ax = fig.add_subplot(gs[r, c]); ax.set_facecolor('white'); style(ax)
+            shade(ax, wins)
+            ax.plot(fr, mo[:, ANK, ci], color=COL['orig'], lw=1.4, label='original')
+            ax.plot(fr, dk[:, ANK, ci], color=COL['deskate'], lw=1.4, label='de-skate')
+            ax.plot(fr, v[:, ANK, ci], color=COL['ours'], lw=1.7, label='Ours (full)')
+            ax.set_xlim(lo, hi)
+            rug(ax, cf[(cf >= lo) & (cf < hi)])
+            if c == 0:
+                ax.set_ylabel(f'left ankle {coord} (m)')
+            if zoom:
+                ax.set_title('zoom: one contact window', color=C_MUT, fontsize=8)
+            if r == 1:
+                ax.set_xlabel('frame')
+    handles = [plt.Line2D([], [], color=COL['orig'], lw=1.6, label='original'),
+               plt.Line2D([], [], color=COL['deskate'], lw=1.6, label='de-skate'),
+               plt.Line2D([], [], color=COL['ours'], lw=1.8, label='Ours (full)'),
+               plt.Line2D([], [], color=CLAMP, lw=1.4, label='reach-clamp (rug)'),
+               matplotlib.patches.Patch(color=SHADE, alpha=0.10, label='contact window')]
+    fig.legend(handles=handles, frameon=False, ncol=5, loc='lower center',
+               bbox_to_anchor=(0.5, -0.02), labelcolor=C_MUT)
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    fig.savefig(f"{ANA}/fig_trajectory.png", dpi=170, facecolor='white', bbox_inches='tight')
     plt.close(fig)
 
-    # ── Figure 3: ankle horizontal speed over time ──
+    # ── Figure S: horizontal speed, split-y (spikes on top, decision band below) ──
     def hspeed(x):
         return np.r_[0, np.linalg.norm(np.diff(x[:, ANK][:, [0, 2]], axis=0), axis=-1)]
-    fig, ax = plt.subplots(figsize=(9, 3.4), facecolor='#fcfcfb')
-    ax.set_facecolor('#fcfcfb'); style(ax)
-    shade(ax, wins, clamp)
-    ax.axhline(0.03, color='#b8860b', lw=1.0, ls='--', alpha=0.8, label='FSR threshold (0.03)')
-    ax.plot(fr, hspeed(mo), color=COL['original'], lw=1.5, label='original', alpha=0.9)
-    ax.plot(fr, hspeed(apply_ik(mo, dk)), color=COL['deskate'], lw=1.5, label='de-skate+IK', alpha=0.9)
-    ax.plot(fr, hspeed(v19), color=COL['v19'], lw=1.8, label='full (V19)', alpha=0.95)
-    ax.set_ylabel('left-ankle horizontal speed (m/frame)', fontsize=10, color=C_MUT)
-    ax.set_xlabel('frame', fontsize=10, color=C_MUT)
-    ax.legend(frameon=False, fontsize=9, labelcolor=C_MUT, ncol=2)
-    fig.suptitle(f'Left-ankle horizontal speed (clip {name}): de-skate spikes at contact boundaries, '
-                 'smoother flattens them',
-                 fontsize=10, color=C_INK, x=0.008, ha='left')
-    fig.tight_layout(rect=[0, 0, 1, 0.93])
-    fig.savefig(f"{ANA}/fig3_ankle_speed.png", dpi=170, facecolor='#fcfcfb')
+    so, sd, sv = hspeed(mo), hspeed(apply_ik(mo, dk)), hspeed(v)
+    fig, (axT, axB) = plt.subplots(2, 1, figsize=(9.2, 4.4), facecolor='white',
+                                   sharex=True, gridspec_kw={'height_ratios': [1, 1.4], 'hspace': 0.12})
+    for ax, (lo, hi) in [(axT, (0.10, 0.52)), (axB, (0.0, 0.10))]:
+        ax.set_facecolor('white'); style(ax)
+        shade(ax, wins)
+        ax.plot(fr, so, color=COL['orig'], lw=1.3, label='original')
+        ax.plot(fr, sd, color=COL['deskate'], lw=1.3, label='de-skate+IK')
+        ax.plot(fr, sv, color=COL['ours'], lw=1.7, label='Ours (full)')
+        ax.set_ylim(lo, hi)
+    axB.axhline(0.03, color='#1a1a1a', lw=1.0, ls='--', alpha=0.8)
+    axB.text(T * 0.995, 0.033, r'$\tau = 0.03$ (FSR threshold)', ha='right', fontsize=8, color='#1a1a1a')
+    axT.spines['bottom'].set_visible(False); axT.tick_params(bottom=False)
+    axB.set_ylabel('left-ankle horizontal speed (m/frame)')
+    axB.yaxis.set_label_coords(-0.07, 1.0)
+    axB.set_xlabel('frame')
+    rug(axB, cf)
+    handles = [plt.Line2D([], [], color=COL['orig'], lw=1.5, label='original'),
+               plt.Line2D([], [], color=COL['deskate'], lw=1.5, label='de-skate+IK'),
+               plt.Line2D([], [], color=COL['ours'], lw=1.8, label='Ours (full)'),
+               matplotlib.patches.Patch(color=SHADE, alpha=0.10, label='contact window'),
+               plt.Line2D([], [], color=CLAMP, lw=1.4, label='reach-clamp (rug)')]
+    fig.legend(handles=handles, frameon=False, ncol=5, loc='lower center',
+               bbox_to_anchor=(0.5, -0.02), labelcolor=C_MUT)
+    fig.tight_layout(rect=[0, 0.05, 1, 1])
+    fig.savefig(f"{ANA}/fig_speed.png", dpi=170, facecolor='white', bbox_inches='tight')
     plt.close(fig)
-    print(f"-> {ANA}/fig2_ankle_trajectory.png\n-> {ANA}/fig3_ankle_speed.png")
+    print(f"-> {ANA}/fig_trajectory.png\n-> {ANA}/fig_speed.png")
 
 
 if __name__ == "__main__":
