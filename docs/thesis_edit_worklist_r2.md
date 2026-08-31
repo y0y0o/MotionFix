@@ -5,17 +5,39 @@
 
 ---
 
-## A1 🔴🟡【最严重·结果待填】IK-in-the-loop 的 frontier 证据(审稿人「一」)
-- 问题成立:贡献#2 反复称 IK-in-the-loop 是 "technical novelty",但只有单点对比;去掉它
-  (learn_ik)jitter 三生成器全场最低、只是 FSR 变差 = 纯沿 frontier 移动,看不出 frontier 外收益。
-- **我正在做他要的实验**:同模型同损失,`--no-ik-in-loop` 只切 loss 算在 pre-IK/post-IK,
-  with/without 各 5 个 jit-share 操作点,叠 frontier(`analysis/v19_ikloop_frontier.py`
-  → `ikloop_frontier.json` + `.png`)。
-- **【结果待填】** 两种结局的写法:
-  - **曲线分离(with-IK 更靠左下)** → 贡献#2 成立,这张图放正文,是最有力证据。
-  - **曲线重叠** → 诚实降级:IK-in-the-loop 不改变 frontier,只让工作点更可控/训练更稳,
-    **不能叫 "technical novelty"**,贡献列表#2 重写为"训练稳定性/可控性"层面的贡献。
-- 图完成后我会直接给你结论 + png 路径。
+## A1 🔴✅【最严重·已定论·贡献#2 成立且更强】IK-in-the-loop 的 frontier 证据(审稿人「一」)
+**实验已跑完**(`analysis/v19_ikloop_frontier.py` → `analysis/v19/ikloop_frontier.json` +
+`ikloop_frontier.png`;诊断见下)。同模型同损失,`--no-ik-in-loop` 只切 loss 算在 pre-IK/post-IK,
+with/without 各 5 个 jit-share × 2 生成器。**结果不是"frontier 平移",而是 without-IK 直接崩溃:**
+
+| 模型(jit=0.88) | pre-IK 残差 | pre-IK FSR | **post-IK FSR** |
+|---|---|---|---|
+| with-IK | 0.003 m | 5.48% | **5.64%** |
+| without-IK | **0.335 m** | **0.00%** | **15.53%** |
+
+- **机制(= 论文 §3.4 想堵的 proxy-gaming)**:without-IK 模型没见过 IK,就把踝推到 0.34 m 远、
+  让 pre-IK FSR 完美归零(val loss 0.00026);但该目标远超腿长可达域,推理时 reach-clamp 把踝拉回
+  → post-IK FSR 爆到 15.5%(**比原始 6.43% 还差一倍**)。
+- **跨设置全复现**:5 个 jit-share(0.45–0.94)× 2 anchor(0.05–0.20),without-IK 全部塌到
+  t2mgpt ~14.5% / momask ~16%,**没有可用 frontier**;with-IK 是正常 frontier
+  (t2mgpt FSR 4.16→5.52%,jit 0.0129→0.0074)。
+- **贡献#2 的结论(比原文更强)**:IK-in-the-loop **不是**沿 frontier 挪工作点,而是**承重的**——
+  它使阈值对齐的软计数损失不被 trivially 钻空子;去掉它,学习平滑器**不可用**(比不修更差)。
+- **诚实边界**:这证明"IK-in-loop 对 V19 损失是必需的",**不改变**"learned ≈ Gaussian"结论(见 A2)。
+- **可粘(§3.4 / §5 消融 / 贡献#2 论证)**:
+  > To test whether IK-in-the-loop provides a benefit beyond moving along the FSR–jitter
+  > frontier, we trained the identical smoother and loss with the loss computed on the
+  > pre-IK output instead (inference still applies IK). Without IK-in-the-loop the model
+  > games the proxy: it drives the pre-IK ankle 0.34 m from the de-skated reference to
+  > reach 0.00% pre-IK FSR, but this target lies far outside the leg's reachable range, so
+  > the inference-time IK clamp pulls the ankle back and the post-IK FSR rises to 15.5%
+  > (T2M-GPT) / 16% (MoMask) — worse than the uncorrected 6.4% / 7.9%. This collapse is
+  > invariant to the jit-share (0.45–0.94) and anchor (0.05–0.20) settings: without
+  > IK-in-the-loop there is no usable frontier. IK-in-the-loop is therefore load-bearing
+  > rather than a convenience — it is what makes the threshold-aligned loss safe — while
+  > the "learned ≈ tuned Gaussian" finding (Section 5.1) concerns the with-IK model.
+- **图**:`analysis/v19/ikloop_frontier.png` 已生成(without-IK 点全悬在 with-IK 曲线上方远处)。
+  放正文时把 caption 说清楚这是"proxy-gaming 崩溃",不是普通 frontier。
 
 ---
 
