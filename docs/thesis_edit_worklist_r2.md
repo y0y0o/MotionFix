@@ -162,11 +162,13 @@ FSR 再在 planted 帧里数**水平速度 > 0.03 m/frame(SKATE_THRESH)**的比�
 ## B 必加 🟠(图 + 表)
 
 ### B1 三张图(审稿人「五」——现在全是 PLACEHOLDER,提交版绝不能留)
-1. **Frontier 图**(learned vs Gaussian vs **w/o IK-in-loop**,每生成器一 panel)—— A1 的图正好并进来。
-2. **踝 XZ 轨迹叠加图**(original/de-skate/full,标 contact window + reach-clamp 触发帧)。
-3. **踝速度时序**。
-- **图 2、3 我可以直接生成**(数据现成);图 1 就是 A1 那张。要的话我一起出。
-- Figure 3 caption 里的 `from analysis/v19/frontier.json` 记得删,别让内部路径进正文。
+1. **Frontier 图**(learned vs Gaussian vs **w/o IK-in-loop**)—— 🟡 A1 已出 withik vs noik
+   (`analysis/v19/ikloop_frontier.png`);若要三条曲线含 Gaussian(数据在 `transfer.json`),我可再合一张。
+2. ✅ **踝 XZ 轨迹叠加图** → `analysis/v19/fig2_ankle_trajectory.png`
+   (original/de-skate/full,阴影=contact window,magenta=reach-clamp;脚本 `analysis/v19_figs.py`,clip 004822)。
+3. ✅ **踝速度时序** → `analysis/v19/fig3_ankle_speed.png`
+   (原始在 0.03 阈值上=滑动;de-skate+IK 边界尖峰;V19 压平)。
+- Figure caption 里的 `from analysis/v19/frontier.json` 记得删,别让内部路径进正文。
 
 ### B2 §5.4 补 R-precision / Diversity 显著性 + 解释异常值(审稿人「七.4/七.5」)
 - 摘要/结论说"no significant change in R-precision"但只给了 MM-Dist 的 CI。**补 R-precision 的
