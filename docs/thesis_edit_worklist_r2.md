@@ -161,14 +161,17 @@ FSR 再在 planted 帧里数**水平速度 > 0.03 m/frame(SKATE_THRESH)**的比�
 
 ## B 必加 🟠(图 + 表)
 
-### B1 三张图(审稿人「五」——现在全是 PLACEHOLDER,提交版绝不能留)
-1. **Frontier 图**(learned vs Gaussian vs **w/o IK-in-loop**)—— 🟡 A1 已出 withik vs noik
-   (`analysis/v19/ikloop_frontier.png`);若要三条曲线含 Gaussian(数据在 `transfer.json`),我可再合一张。
-2. ✅ **踝 XZ 轨迹叠加图** → `analysis/v19/fig2_ankle_trajectory.png`
-   (original/de-skate/full,阴影=contact window,magenta=reach-clamp;脚本 `analysis/v19_figs.py`,clip 004822)。
-3. ✅ **踝速度时序** → `analysis/v19/fig3_ankle_speed.png`
-   (原始在 0.03 阈值上=滑动;de-skate+IK 边界尖峰;V19 压平)。
-- Figure caption 里的 `from analysis/v19/frontier.json` 记得删,别让内部路径进正文。
+### B1 三张图(审稿人「五」)—— ✅ 全部完成(脚本 `analysis/v19_frontier_fig.py` + `v19_figs.py`)
+1. ✅ **主 Frontier 图** → `analysis/v19/fig_frontier.png`(三联:T2M-GPT/MoMask/MDM;三曲线
+   With-IK / Gaussian / Without-IK;**断轴**上段放 without-IK 崩溃、下段放真实 frontier;
+   uncorrected 虚线 + 交付点星标)。With-IK≈Gaussian(差 0.2–0.4pp)、without-IK 14–25%。**放 §5.B。**
+2. ✅ **踝 XZ 轨迹图** → `analysis/v19/fig_trajectory.png`(全长 + zoom inset;串字体;clamp 底部 rug;
+   Ours(full);zoom 目视证实无过冲)。
+3. ✅ **踝速度图** → `analysis/v19/fig_speed.png`(拆双 panel:上尖峰/下 0-0.1 决策带;τ=0.03 标注;
+   图例移出;contact 阴影)。
+- 三图都用 serif 字体、语义 label、无图内问句标题;caption 用我给的带结论句版本。
+- 旧文件 `fig2_*/fig3_*/ikloop_frontier.png` 已被上述取代,可删。
+- FootErr 列(证 v19 无过冲):T2M-GPT 0.0315 / MoMask 0.0361 / MDM 0.0250(≈deskate<gauss<learn),补进 Table。
 
 ### B2 §5.4 补 R-precision / Diversity 显著性 + 解释异常值(审稿人「七.4/七.5」)
 - 摘要/结论说"no significant change in R-precision"但只给了 MM-Dist 的 CI。**补 R-precision 的
